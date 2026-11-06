@@ -1,0 +1,18 @@
+/* Front page hero: "Take a hike" and its subtitle sit straight on the video, top left, with no card behind them.
+   Loaded by app.js after index.html's styles, so these rules take over from the centred hero card there.
+   The card's link rows (Map, Trails, Stays) are hidden; the same links are in the menu. */
+.hero { align-items: flex-start; }
+.hero .herowrap { justify-content: flex-start; padding-block: 128px 160px; }
+.hero .herocard { width: auto; max-width: 34rem; padding: 0; gap: 0; background: none; border-radius: 0; -webkit-backdrop-filter: none; backdrop-filter: none; }
+.hero .herocard .herorows { display: none; }
+.hero .herocard h1 { font-size: 3.25rem; line-height: 1.05; margin: 0; }
+.hero .herocard p.herosub { font-size: 1.25rem; line-height: 1.35; margin: 12px 0 0; }
+@media (max-width: 960px) {
+  .hero .herowrap { padding-block: 112px 140px; }
+  .hero .herocard h1 { font-size: 2.5rem; }
+  .hero .herocard p.herosub { font-size: 1.1rem; }
+}
+@media (max-width: 560px) {
+  .hero .herowrap { padding-block: 104px 120px; }
+  .hero .herocard h1 { font-size: 2.25rem; }
+}
