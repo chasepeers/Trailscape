@@ -1,0 +1,5 @@
+# Generated at build time
+public/
+trails-data.js
+node_modules/
+.DS_Store

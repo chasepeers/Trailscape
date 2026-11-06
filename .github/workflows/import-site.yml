@@ -1,0 +1,50 @@
+# One-time job: copies the live site files from the Vercel deployment into this repo,
+# checks them against the deployment's checksums and commits them. Delete this file afterwards.
+name: Import site files from Vercel
+on:
+  push:
+    branches: [main]
+    paths: [.github/workflows/import-site.yml]
+  workflow_dispatch:
+permissions:
+  contents: write
+jobs:
+  import:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Download and verify
+        run: |
+          set -euo pipefail
+          base=https://lekkertrail.vercel.app
+          # Unchanged files: must match the Vercel deployment's SHA1 exactly.
+          while read -r f sha; do
+            curl -fsSL "$base/$f" -o "$f"
+            got=$(sha1sum "$f" | cut -d' ' -f1)
+            if [ "$got" != "$sha" ]; then echo "::error::checksum mismatch for $f ($got)"; exit 1; fi
+            echo "ok $f"
+          done <<'EOF'
+          app.js 778bb8351f3fdb311d2a2bb31f6bcbad7ec90c70
+          hiking-areas.js 7b7cfe0c7ee0ca3c7e6a5dcf86008d8d261b76a9
+          home.css 087365fc4e142a481595633b39bfb21a9311615e
+          map-layers.js b2143b22d78e381270a43450913e48a0b78c06fe
+          stays-data.js 185627c91f4b289e052423fc36039e3db9e0f468
+          stays.js 8164f3987fb060b2f9516cf8b68a0a47f258308e
+          EOF
+          # Renamed files (already carry the Trailscape name): check they arrived whole.
+          for f in index.html app-core.js booking.js; do
+            curl -fsSL "$base/$f" -o "$f"
+            if grep -qiE 'hike and seek|hikeandseek' "$f"; then echo "::error::$f still has the old name"; exit 1; fi
+            grep -q 'Trailscape' "$f" || { echo "::error::$f is missing the new name"; exit 1; }
+            echo "ok $f ($(wc -c < "$f") bytes)"
+          done
+          for f in *.js; do node --check "$f"; done
+          grep -q '</html>' index.html
+      - name: Commit
+        run: |
+          set -euo pipefail
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add index.html app.js app-core.js booking.js stays.js stays-data.js map-layers.js home.css hiking-areas.js
+          git commit -m "Import Trailscape site files from the live Vercel deployment"
+          git push
