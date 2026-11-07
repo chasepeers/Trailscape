@@ -177,6 +177,9 @@
     };
     return { getAvailability: q => get("availability", q), getBooked: q => get("booked", q), createBooking: p => post("bookings", p), createEnquiry: p => post("enquiries", p) };
   })() : null;
+  // payments: false while no payment gateway is connected. Instant bookings are then taken as requests: nothing is
+  // charged, we book with the stay and send a payment link. Set HS_CONFIG.payments = true once the gateway is live.
+  const PAYMENTS = cfg.payments !== false;
   const backend = () => window.HS_BACKEND || apiBackend || sampleBackend;
   const call = (fn, arg) => { const b = backend(); return (b[fn] ? b : sampleBackend)[fn](arg); };
   const isSample = fn => { const b = backend(); return b === sampleBackend || !b[fn]; };
@@ -422,7 +425,7 @@
     </div>`;
   }
   const howText = u => instant(u)
-    ? `${esc(cap(u.who))}'s calendar is live, through ${INSTANT_ENGINE}. Book and pay here, and your booking is confirmed straight away.`
+    ? `${esc(cap(u.who))}'s calendar is live, through ${INSTANT_ENGINE}. ${PAYMENTS ? "Book and pay here, and your booking is confirmed straight away." : "Book here and your beds are held straight away. We confirm with the stay and send a payment link."}`
     : `We check your dates with ${esc(u.who)} and reply within about 48 hours with availability and the exact price. Nothing is charged until you accept.`;
   const notReady = () => { view.innerHTML = `<div class="wrap phead"><p class="muted">Loading stays…</p></div>`; };
   const notFound = () => { view.innerHTML = `<div class="wrap phead"><div class="eyebrow">Stays</div><h1>We couldn't find that stay</h1><p class="lead"><a href="#stays">See every stay</a> or <a href="#map">find one on the map</a>.</p></div>`; };
@@ -545,8 +548,9 @@
             <div><div class="field" style="margin-bottom:6px">Pay with</div>
               <div class="gw"><label><input type="radio" name="gw" value="card" checked> Card</label><label><input type="radio" name="gw" value="eft"> Instant EFT</label></div></div>
             <label class="field hscheck"><input type="checkbox" required> I agree that Trailscape books on my behalf and may share my name and contact details with ${esc(u.who)} for this booking. ${esc(cap(u.who))}'s own cancellation rules apply to the stay fees; our fee isn't refundable once the booking is confirmed.</label>
-            <div class="note">These dates are held for you while you pay. Your booking is confirmed as soon as payment goes through.</div>
-            <div style="display:flex;gap:10px;flex-wrap:wrap"><button class="btn line" type="button" id="b-back">← Change dates</button><button class="btn primary" type="submit" id="b-go">Pay ${R(q.total)} and book</button></div>
+            <div class="note">${PAYMENTS ? "These dates are held for you while you pay. Your booking is confirmed as soon as payment goes through."
+              : `These beds are held for you as soon as you book. Nothing is charged now: we book with ${esc(u.who)}, then email your confirmation and a secure payment link for ${R(q.total)}.`}</div>
+            <div style="display:flex;gap:10px;flex-wrap:wrap"><button class="btn line" type="button" id="b-back">← Change dates</button><button class="btn primary" type="submit" id="b-go">${PAYMENTS ? `Pay ${R(q.total)} and book` : "Book these dates"}</button></div>
             ${isSample("createBooking") ? `<span class="muted" style="font-size:.8rem">Prototype: no payment is taken and nothing is sent to the operator.</span>` : ""}
           </form>
           ${aside()}
@@ -591,7 +595,9 @@
     }
     function s3(ref) {
       stage = 3;
-      const evs = live
+      const evs = live && !PAYMENTS
+        ? [["Booking received", "Your beds are held. Nothing charged yet"], [`Booking with ${u.who}`, `We reserve your dates in their ${INSTANT_ENGINE} calendar`], ["Confirmed", "We email your confirmation and a payment link"]]
+        : live
         ? [["Booking received", "Payment taken"], [`Booked in ${u.who}'s calendar`, `Your dates are reserved through ${INSTANT_ENGINE}`], ["Confirmed", "Your booking details are sent to your email"]]
         : [["Enquiry received", "No payment taken"], [`Checking with ${u.who}`, "We ask about availability and the exact price"], [`${cap(u.who)} replies`, "Usually within 48 hours"], ["You accept and pay", "We send you the price and a payment link"], ["Confirmed", "Your booking details are sent to your email"]];
       shell(`<div class="card panel">
@@ -600,11 +606,11 @@
         <div class="track" id="trk">${evs.map((e, i) => `<div class="trk" data-i="${i}"><span class="dot"></span><div><b>${esc(e[0])}</b><span>${esc(e[1])}</span></div><time></time></div>`).join("")}</div>
         ${live ? "" : `<div class="note">We'll email you as soon as ${esc(u.who)} replies. Your enquiry is saved in My trips.</div>`}
         <div style="display:flex;gap:10px;flex-wrap:wrap"><a class="btn line" href="#trips">View my trips</a><a class="btn line" href="#ops">See it in the back office</a></div></div>`);
-      const limit = live ? evs.length : 2; let i = 0;
+      const limit = live && PAYMENTS ? evs.length : live ? 1 : 2; let i = 0;
       const tick = () => {
         if (!$("#trk")) return;
         document.querySelectorAll(".trk").forEach(r => { const k = +r.dataset.i; r.classList.toggle("done", k < i); r.classList.toggle("now", k === i && i < limit); if (k < i && !r.querySelector("time").textContent) r.querySelector("time").textContent = new Date().toTimeString().slice(0, 5); });
-        if (i >= limit) { $("#stat-tag").textContent = live ? "Confirmed" : `Waiting for ${u.who}`; $("#stat-tag").className = "tag " + (live ? "ok" : "warn"); return; }
+        if (i >= limit) { const done = live && PAYMENTS; $("#stat-tag").textContent = done ? "Confirmed" : live ? `Booking with ${u.who}` : `Waiting for ${u.who}`; $("#stat-tag").className = "tag " + (done ? "ok" : "warn"); return; }
         i++; setTimeout(tick, 900);
       };
       setTimeout(tick, 400);
@@ -624,7 +630,7 @@
     const status = t => {
       if (t.past) return ["Completed", "mute"];
       if (t.kind === "enquiry") { const u = getU(t.place); return [`Enquiry sent · waiting for ${u ? u.who : "the operator"}`, "warn"]; }
-      if (t.kind === "booking") return ["Confirmed", "ok"];
+      if (t.kind === "booking") { const u = getU(t.place); return PAYMENTS ? ["Confirmed", "ok"] : [`Booked · confirming with ${u ? u.who : "the stay"}`, "warn"]; }
       const p = place(t.place); return p && OPS[p.op] && OPS[p.op].channel === "portal" ? ["Confirmed", "ok"] : ["Waiting for operator", "warn"];
     };
     const alertIds = Object.keys(store.get("alerts", {}));
@@ -685,7 +691,7 @@
     box.className = "hsbook";
     box.innerHTML = `<div class="p"><span>from <b>${R(u.price)}</b> pp per night${u.est ? `<span class="hsest">est.</span>` : ""}</span>${modeTag(u)}</div>
       <div class="btns"><a class="btn primary sm" href="#book-${u.id}">${instant(u) ? "Check dates" : "Enquire"}</a><a class="btn line sm" href="#stay-${u.id}">View stay</a></div>
-      <small>${instant(u) ? "Live calendar. Book and pay on Trailscape." : "Availability on enquiry. We check with the operator for you."}</small>`;
+      <small>${instant(u) ? (PAYMENTS ? "Live calendar. Book and pay on Trailscape." : "Live calendar. Book on Trailscape, pay when confirmed.") : "Availability on enquiry. We check with the operator for you."}</small>`;
     const dl = card.querySelector("dl");
     if (dl) dl.after(box); else card.appendChild(box);
   }

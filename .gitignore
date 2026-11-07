@@ -3,3 +3,7 @@ public/
 trails-data.js
 node_modules/
 .DS_Store
+
+# Local Cloudflare dev files
+.wrangler/
+.dev.vars

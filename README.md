@@ -35,6 +35,34 @@ site until November 2026.
 - `map-layers.js`: map layer panel, trails, side-panel sections
 - `booking.js`: on-site booking with availability calendar
 - `home.css`: front page hero styles
+- `admin.html`: back office for enquiries, bookings, blocked nights and stay prices
+
+## Back end (bookings API)
+
+Cloudflare Pages Functions in `functions/api/`, with shared code in `lib/api.js` and a D1 database (`trailscape`,
+bound as `DB` in `wrangler.toml`). The site calls it through `window.HS_CONFIG = { apiBase: "/api" }` in `index.html`.
+
+| Endpoint | Used by |
+| --- | --- |
+| `GET /api/availability?stay=&from=&to=` | calendar for instant-booking stays |
+| `GET /api/booked?stay=&from=&to=` | calendar for enquiry stays (nights already taken) |
+| `POST /api/enquiries` | enquiry form |
+| `POST /api/bookings` | instant booking (payment is a stub until a gateway is chosen) |
+| `GET /api/health` | quick check that the database is connected |
+| `/api/admin/*` | back office at `/admin.html` (password = `ADMIN_TOKEN` secret) |
+
+Prices are recalculated on the server; the browser's quote is only kept for comparison.
+
+**Secrets** (Cloudflare → Workers & Pages → trailscape → Settings → Variables and Secrets, for Production and Preview):
+`ADMIN_TOKEN` (required for the back office) and `RESEND_API_KEY` (optional; turns on emails to you and to guests).
+
+**Database changes:** add a numbered file to `migrations/` and apply it with
+`npx wrangler d1 migrations apply trailscape --remote`. `node scripts/make-seed.mjs` rebuilds `seed/stays.sql` from the
+site's stay data; running it again refreshes names and estimates but keeps real rates entered in the back office.
+
+**Local testing:** `node build-trails.mjs`, then `npx wrangler d1 migrations apply trailscape --local`,
+`npx wrangler d1 execute trailscape --local --file seed/stays.sql`, put `ADMIN_TOKEN=...` in `.dev.vars`, and run
+`npx wrangler pages dev public`.
 
 ## Map tiles
 
