@@ -531,11 +531,12 @@
       phone.onchange = () => cal && stage === 1 && cal.setMonths(phone.matches ? 1 : 2);
       next.onclick = () => { if (!cal.valid()) { toast(live ? "Those dates are no longer available. Pick again." : "Some of those nights are already booked. Pick again."); return; } q = quoteOf(u, cal, draft.n); s2(); };
     }
+    const acctField = k => { const A = window.TSAccount; return (A && A.user && A.user[k]) || ""; };
     const contactFields = () => `
       <div class="paybox">
-        <label class="field">Full name<input id="c-name" required autocomplete="name" placeholder="Lead hiker" value="${esc(draft.name || "")}"></label>
-        <label class="field">Mobile<input id="c-phone" type="tel" required autocomplete="tel" placeholder="082 000 0000" value="${esc(draft.phone || "")}"></label>
-        <label class="field full">Email<input id="c-email" type="email" required autocomplete="email" placeholder="you@example.com" value="${esc(draft.email || "")}"></label>
+        <label class="field">Full name<input id="c-name" required autocomplete="name" placeholder="Lead hiker" value="${esc(draft.name || acctField("name"))}"></label>
+        <label class="field">Mobile<input id="c-phone" type="tel" required autocomplete="tel" placeholder="082 000 0000" value="${esc(draft.phone || acctField("phone"))}"></label>
+        <label class="field full">Email<input id="c-email" type="email" required autocomplete="email" placeholder="you@example.com" value="${esc(draft.email || acctField("email"))}"></label>
       </div>`;
     const guest = () => ({ name: $("#c-name").value.trim(), phone: $("#c-phone").value.trim(), email: $("#c-email").value.trim() });
     function s2() {
@@ -605,7 +606,7 @@
         <div class="muted" style="font-size:.92rem">${fmtLong(q.in)} → ${fmtLong(q.out)} · ${q.nights} ${q.nights === 1 ? "night" : "nights"} · ${live ? R(q.total) : "guide price " + R(q.total)}</div>
         <div class="track" id="trk">${evs.map((e, i) => `<div class="trk" data-i="${i}"><span class="dot"></span><div><b>${esc(e[0])}</b><span>${esc(e[1])}</span></div><time></time></div>`).join("")}</div>
         ${live ? "" : `<div class="note">We'll email you as soon as ${esc(u.who)} replies. Your enquiry is saved in My trips.</div>`}
-        <div style="display:flex;gap:10px;flex-wrap:wrap"><a class="btn line" href="#trips">View my trips</a><a class="btn line" href="#ops">See it in the back office</a></div></div>`);
+        <div style="display:flex;gap:10px;flex-wrap:wrap"><a class="btn line" href="#trips">View my trips</a></div></div>`);
       const limit = live && PAYMENTS ? evs.length : live ? 1 : 2; let i = 0;
       const tick = () => {
         if (!$("#trk")) return;
@@ -623,25 +624,64 @@
     } else s1();
   };
 
-  // ---------- my trips: bookings and enquiries ----------
-  trips = function () {
-    const all = [...myTrips, { ref: "LT-0988", place: "landdroskop", date: "2026-08-15", n: 3, total: 1020, past: true }];
-    const nameOf = id => { const u = getU(id); if (u) return u.name; const p = place(id); return p ? p.name : id; };
-    const status = t => {
-      if (t.past) return ["Completed", "mute"];
-      if (t.kind === "enquiry") { const u = getU(t.place); return [`Enquiry sent · waiting for ${u ? u.who : "the operator"}`, "warn"]; }
-      if (t.kind === "booking") { const u = getU(t.place); return PAYMENTS ? ["Confirmed", "ok"] : [`Booked · confirming with ${u ? u.who : "the stay"}`, "warn"]; }
-      const p = place(t.place); return p && OPS[p.op] && OPS[p.op].channel === "portal" ? ["Confirmed", "ok"] : ["Waiting for operator", "warn"];
-    };
-    const alertIds = Object.keys(store.get("alerts", {}));
-    view.innerHTML = `<div class="wrap phead"><div class="eyebrow">Account</div><h1>My trips</h1><p class="lead">Every booking and enquiry, its status, and your alerts. Anything you do in this prototype is kept in this browser only.</p></div>
-    <div class="wrap"><div class="list">${all.map(t => { const [s, c] = status(t); return `
-      <a class="row" href="#stay-${esc(t.place)}"><div><h3>${esc(nameOf(t.place))}</h3><div class="meta"><span class="mono">${esc(t.ref)}</span><span>${t.out ? `${fmtShort(t.date)} → ${fmtShort(t.out)}` : fmtDate(t.date)}</span><span>${t.n} ${t.n === 1 ? "hiker" : "hikers"}</span>${t.kind === "enquiry" ? "<span>Enquiry</span>" : ""}</div></div>
-      <div class="right"><b>${t.kind === "enquiry" ? "≈ " : ""}${R(t.total)}</b><span class="tag ${c}">${esc(s)}</span></div></a>`; }).join("")}
-    ${myTrips.length ? "" : `<p class="muted" style="padding:18px 0 0">No bookings or enquiries yet. <a href="#map">Find a stay</a> to see one appear here.</p>`}</div>
-    <h2 style="font-size:1.4rem;margin-top:8px">Cancellation alerts</h2>
-    <div class="list">${alertIds.map(id => `<a class="row" href="#stay-${esc(id)}"><div><h3>${esc(nameOf(id))}</h3><div class="meta"><span>Watching all dates</span></div></div><div class="right"><span class="tag info">Alert on</span></div></a>`).join("") || `<p class="muted">No alerts yet. Turn one on from any stay page.</p>`}</div></div>`;
+  // ---------- my trips: sign in here (account.js), then your enquiries and bookings from the server ----------
+  const ACCT = () => window.TSAccount;
+  const tripRow = (t, [s, c]) => {
+    const u = getU(t.place), p = u ? null : place(t.place), name = u ? u.name : p ? p.name : t.place;
+    return `<a class="row" href="#stay-${esc(t.place)}"><div><h3>${esc(name)}</h3><div class="meta"><span class="mono">${esc(t.ref)}</span><span>${t.out ? `${fmtShort(t.date)} → ${fmtShort(t.out)}` : fmtDate(t.date)}</span><span>${t.n} ${t.n === 1 ? "hiker" : "hikers"}</span>${t.kind === "enquiry" ? "<span>Enquiry</span>" : ""}</div></div>
+      <div class="right"><b>${t.kind === "enquiry" ? "≈ " : ""}${t.total != null ? R(t.total) : ""}</b><span class="tag ${c}">${esc(s)}</span></div></a>`;
   };
+  function serverStatus(t) {
+    const u = getU(t.place), who = u ? u.who : "the operator", past = t.out && t.out <= todayS();
+    if (t.kind === "enquiry") return ({ new: [`Enquiry sent · waiting for ${who}`, "warn"], asked_operator: [`Checking with ${who}`, "warn"],
+      operator_replied: ["Offer on its way", "info"], offer_sent: ["Offer sent · check your email", "info"], accepted: ["Accepted", "ok"],
+      declined: ["Declined", "mute"], unavailable: ["Not available", "mute"], cancelled: ["Cancelled", "mute"] })[t.status] || [t.status, "mute"];
+    if (t.status === "confirmed") return past ? ["Completed", "mute"] : ["Confirmed", "ok"];
+    if (t.status === "cancelled" || t.status === "failed") return ["Cancelled", "mute"];
+    return [`Booked · confirming with ${who}`, "warn"];
+  }
+  function alertsHTML() {
+    const ids = Object.keys(store.get("alerts", {}));
+    const nameOf = id => { const u = getU(id); if (u) return u.name; const p = place(id); return p ? p.name : id; };
+    return `<h2 style="font-size:1.4rem;margin-top:8px">Cancellation alerts</h2>
+    <div class="list">${ids.map(id => `<a class="row" href="#stay-${esc(id)}"><div><h3>${esc(nameOf(id))}</h3><div class="meta"><span>Watching all dates</span></div></div><div class="right"><span class="tag info">Alert on</span></div></a>`).join("") || `<p class="muted">No alerts yet. Turn one on from any stay page.</p>`}</div>`;
+  }
+  // Without the API (local prototype), trips made in this browser.
+  function localTrips() {
+    const status = t => t.kind === "enquiry" ? [`Enquiry sent · waiting for ${(getU(t.place) || {}).who || "the operator"}`, "warn"] : [`Booked · confirming with ${(getU(t.place) || {}).who || "the stay"}`, "warn"];
+    view.innerHTML = `<div class="wrap phead"><div class="eyebrow">Account</div><h1>My trips</h1><p class="lead">Trips made in this browser.</p></div>
+    <div class="wrap"><div class="list">${myTrips.map(t => tripRow(t, status(t))).join("") || `<p class="muted" style="padding:18px 0 0">No bookings or enquiries yet. <a href="#map">Find a stay</a> to see one appear here.</p>`}</div>${alertsHTML()}</div>`;
+  }
+  trips = function () {
+    const A = ACCT();
+    if (!cfg.apiBase || !A) return localTrips();
+    const head = lead => `<div class="wrap phead"><div class="eyebrow">Account</div><h1>My trips</h1><p class="lead">${lead}</p></div>`;
+    if (!A.user) {
+      view.innerHTML = head("Sign in to see your bookings and enquiries.") + `<div class="wrap"><div id="acct-box"><p class="muted">One moment…</p></div>
+        <p class="muted" style="font-size:.88rem;margin-top:18px">Booked without an account? Create one with the same email address and your trips appear here.</p></div>`;
+      A.ready.then(() => {
+        if (route() !== "trips") return;
+        if (A.user) return nav();
+        A.renderSignIn($("#acct-box"), () => { if (route() === "trips") nav(); });
+      });
+      return;
+    }
+    const me = A.user;
+    view.innerHTML = head("Every booking and enquiry made with your email address, and its status.") + `
+      <div class="wrap"><div class="card panel acct-who"><div><b>${esc(me.name)}</b><div class="muted" style="font-size:.9rem">${esc(me.email)}${me.phone ? " · " + esc(me.phone) : ""}</div></div>
+        <div style="display:flex;gap:8px;flex-wrap:wrap">${me.admin ? `<a class="btn line sm" href="/admin.html">Back office</a>` : ""}<button class="btn line sm" type="button" id="acct-out">Sign out</button></div></div>
+      <div class="list" id="trip-list"><p class="muted" style="padding:18px 0 0">Loading your trips…</p></div>${alertsHTML()}</div>`;
+    $("#acct-out").onclick = async () => { await A.signOut(); if (route() === "trips") nav(); };
+    fetch(cfg.apiBase.replace(/\/$/, "") + "/me/trips", { credentials: "same-origin" }).then(r => r.ok ? r.json() : Promise.reject(r.status)).then(({ trips: list }) => {
+      const el = $("#trip-list"); if (!el) return;
+      const rows = list.map(t => ({ ref: t.ref, place: t.stay_id, kind: t.kind, date: t.check_in, out: t.check_out, n: t.hikers, total: t.total, status: t.status }));
+      el.innerHTML = rows.map(t => tripRow(t, serverStatus(t))).join("") || `<p class="muted" style="padding:18px 0 0">No bookings or enquiries yet. <a href="#map">Find a stay</a> to see one appear here.</p>`;
+    }).catch(err => {
+      if (err === 401) { A.signOut().then(() => route() === "trips" && nav()); return; }
+      const el = $("#trip-list"); if (el) el.innerHTML = `<p class="muted" style="padding:18px 0 0">We couldn't load your trips. Please refresh the page.</p>`;
+    });
+  };
+  if (ACCT()) ACCT().onChange(() => { if (route() === "trips" && !document.querySelector(".acct")) nav(); });
 
   // ---------- stays list: every stay, instant or on enquiry ----------
   huts = function (regionArg) {

@@ -50,7 +50,7 @@ const REGIONS = {
   peninsula: "Cape Peninsula", breede: "Breede & Ceres", west: "West Coast",
 };
 
-// ---------- media (free licences; hotlinked from Unsplash and Pexels, credited on screen) ----------
+// ---------- media (Unsplash and Pexels licences: free use, no credit required; photographer names kept here for our records) ----------
 const HERO_VIDEO = { id: "17786066", by: "Helmut Meijer", page: "https://www.pexels.com/video/wide-view-of-towerkop-pinnacles-17786066/", place: "Towerkop, Klein Swartberg" };
 const heroSrc = () => `https://videos.pexels.com/video-files/${HERO_VIDEO.id}/${HERO_VIDEO.id}-${window.innerWidth > 900 ? "hd_1920_1080" : "hd_1280_720"}_30fps.mp4`;
 const PHOTOS = {
@@ -64,13 +64,15 @@ const PHOTOS = {
   cederberg: { id: "photo-1616258815309-53866115551b", by: "Sean Brookes", where: "Cederberg" },
   tablemtn: { id: "photo-1583409612679-90ecabb5bbb4", by: "Juanita Geldenhuys", where: "Table Mountain" },
   paternoster: { id: "photo-1720206811929-594dc6483578", by: "Grant Durr", where: "Paternoster" },
+  franschhoek: { id: "photo-1741338898082-f0d1484d24f8", by: "Hendrik Prinsloo", where: "Franschhoek Pass, Hottentots Holland mountains" },
+  ceres: { id: "photo-1563656410378-e5c283afafbc", by: "Brent Ninaber", where: "Snow on the mountains around Ceres" },
 };
 const PLACE_PHOTO = { whale: "dehoop", otter: "storms", cogh: "capepoint", outeniqua: "george", swellendam: "swellendam", swartberg: "swartberg", sneeuberg: "cederberg", heritage: "cederberg", sanddrif: "cederberg", fivebay: "paternoster" };
-const REGION_PHOTO = { cederberg: "cederberg", garden: "george", overberg: "swellroad", karoo: "swartberg", peninsula: "tablemtn", west: "paternoster" };
+const REGION_PHOTO = { cederberg: "cederberg", garden: "george", overberg: "swellroad", karoo: "swartberg", hh: "franschhoek", peninsula: "tablemtn", breede: "ceres", west: "paternoster" };
 const photoUrl = (k, w = 900) => `https://images.unsplash.com/${PHOTOS[k].id}?w=${w}&q=72&auto=format&fit=crop`;
 // Photo slot for a card: a real photo when we have one for this place, otherwise the drawn ridgeline art.
 function media(k, pal, seed, alt) {
-  if (k && PHOTOS[k]) return `<div class="ph"><img src="${photoUrl(k)}" srcset="${photoUrl(k, 600)} 600w, ${photoUrl(k, 900)} 900w, ${photoUrl(k, 1400)} 1400w" sizes="(max-width: 560px) 100vw, (max-width: 960px) 50vw, 380px" alt="${esc(alt || PHOTOS[k].where)}" loading="lazy" decoding="async"><span class="cr">${esc(PHOTOS[k].where)} · ${esc(PHOTOS[k].by)} / Unsplash</span></div>`;
+  if (k && PHOTOS[k]) return `<div class="ph"><img src="${photoUrl(k)}" srcset="${photoUrl(k, 600)} 600w, ${photoUrl(k, 900)} 900w, ${photoUrl(k, 1400)} 1400w" sizes="(max-width: 560px) 100vw, (max-width: 960px) 50vw, 380px" alt="${esc(alt || PHOTOS[k].where)}" loading="lazy" decoding="async"></div>`;
   return `<canvas data-pal="${pal}" data-seed="${seed}" aria-hidden="true"></canvas>`;
 }
 const MEDIA_CSS = `
@@ -80,15 +82,22 @@ const MEDIA_CSS = `
 .hero #heroc { visibility: hidden; }
 .hero.still #heroc { visibility: visible; }
 .hero .shade { z-index: 2; }
-.hero .herowrap, .hero .credit { z-index: 3; }
+.hero .herowrap { z-index: 3; }
 .hero .shade { position: absolute; inset: 0; pointer-events: none; background: linear-gradient(180deg, rgba(13,19,33,.18) 0%, rgba(13,19,33,0) 22%, rgba(255,255,255,0) 50%, rgba(255,255,255,.75) 80%, #fff 100%); }
-.hero .credit { position: absolute; right: max(16px, env(safe-area-inset-right, 0px)); bottom: 12px; font-size: .75rem; color: var(--muted); text-decoration: none; z-index: 1; }
-.hero .credit:hover { color: var(--fg); }
 .ph { position: relative; aspect-ratio: 16 / 9; max-width: 100%; overflow: hidden; background: var(--band); }
 .feature .ph { aspect-ratio: 4 / 3; border-radius: 10px; }
 .ph img { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; display: block; transition: transform .5s ease; }
 .tile:hover .ph img { transform: scale(1.04); }
 .ph .cr { position: absolute; left: 8px; bottom: 6px; right: 8px; font-size: .68rem; color: rgba(255,255,255,.9); text-shadow: 0 1px 3px rgba(0,0,0,.6); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.rhead { display: flex; align-items: flex-end; justify-content: space-between; gap: 16px; }
+.rnav { display: flex; gap: 8px; flex: none; }
+.rbtn { width: 42px; height: 42px; border-radius: 50%; border: 1px solid var(--line); background: var(--card, #fff); color: var(--fg); font-size: 1.1rem; cursor: pointer; }
+.rbtn:disabled { opacity: .35; cursor: default; }
+.rcar { display: flex; gap: 18px; margin-top: 36px; overflow-x: auto; scroll-snap-type: x mandatory; scrollbar-width: none; padding: 2px 2px 10px; scroll-padding: 2px; }
+.rcar::-webkit-scrollbar { display: none; }
+.rcar .tile { flex: 0 0 calc((100% - 36px) / 3); scroll-snap-align: start; }
+@media (max-width: 960px) { .rcar .tile { flex-basis: calc((100% - 18px) / 2); } }
+@media (max-width: 560px) { .rcar .tile { flex-basis: 85%; } .rnav { display: none; } }
 .stayphoto { margin: 0 0 24px; border-radius: var(--radius); overflow: hidden; }
 .stayphoto .ph { aspect-ratio: 21 / 9; }
 @media (prefers-reduced-motion: reduce) { .ph img { transition: none; } .tile:hover .ph img { transform: none; } }
@@ -103,27 +112,6 @@ const store = {
   set(k, v) { try { localStorage.setItem("lt-" + k, JSON.stringify(v)); } catch (e) {} },
 };
 let myTrips = store.get("trips", []);
-
-const QUEUE = [
-  { ref: "LT-1042", who: "Thandi M.", place: "whale", date: "2027-04-12", n: 6, status: "approve", channel: "portal", age: "12 min",
-    log: [["07:02", "Request received, " + R(590 * 6 * 4 + 600) + " pre-authorised on card"], ["07:03", "Agent signed in to CapeNature portal (Trailscape business account)"], ["07:04", "Found 6 beds for 4 nights from 12 Apr. Stay fees " + R(590 * 6 * 4)], ["07:04", "Waiting for approval to pay with virtual card •• 4417"]] },
-  { ref: "LT-1041", who: "Pieter v.d. M.", place: "boesmanskloof", date: "2027-03-06", n: 4, status: "email", channel: "email", age: "2 h",
-    log: [["05:40", "Request received"], ["05:41", "Contact found in owner database: bookings@diegalg.example"], ["05:42", "Availability email drafted, awaiting your approval"]],
-    email: { to: "bookings@diegalg.example", subj: "Booking request: 4 hikers, 6 March 2027", body: "Hi there,\n\nI'm writing from Trailscape on behalf of a group of 4 hikers who would like to stay at Die Galg on Saturday 6 March 2027 for the Boesmanskloof Traverse.\n\nCould you let us know if you have space, the total price, and your deposit and cancellation terms? We can pay by EFT as soon as you confirm.\n\nThanks,\nTrailscape Bookings" } },
-  { ref: "LT-1039", who: "Aisha K.", place: "otter", date: "2027-05-20", n: 4, status: "waiting", channel: "email", age: "1 day",
-    log: [["Yesterday", "Email sent to SANParks reservations"], ["Yesterday", "Auto-reminder scheduled for 48 h if no reply"]] },
-  { ref: "LT-1037", who: "James R.", place: "landdroskop", date: "2027-02-27", n: 3, status: "confirmed", channel: "portal", age: "2 days",
-    log: [["Thu", "Booked on CapeNature portal, ref CN-88213"], ["Thu", "Paid R720 with virtual card •• 4417"], ["Thu", "Confirmation sent to client"]] },
-  { ref: "LT-1035", who: "Lerato S.", place: "matroosberg", date: "2027-06-19", n: 8, status: "payout", channel: "email", age: "3 days",
-    log: [["Wed", "Owner confirmed by email: 8 beds, R2 560, 50% deposit"], ["Wed", "Client paid R3 360"], ["Wed", "EFT deposit R1 280 queued to owner"]] },
-  { ref: "LT-1031", who: "Sam O.", place: "whale", date: "2027-03-01", n: 4, status: "full", channel: "portal", age: "4 days",
-    log: [["Mon", "No beds on requested dates"], ["Mon", "Card hold released, client added to cancellation alerts"]] },
-];
-const STATUS = {
-  approve: ["Needs approval", "warn"], email: ["Email to approve", "warn"], waiting: ["Awaiting reply", "info"],
-  confirmed: ["Confirmed", "ok"], payout: ["Payout pending", "info"], full: ["Fully booked", "bad"],
-};
-let opsSel = "LT-1042";
 
 // ---------- helpers ----------
 const place = id => PLACES.find(p => p.id === id);
@@ -281,11 +269,10 @@ function footer() {
     <div class="cols">
       <div><a class="logo" href="#home" style="color:var(--fg)">Trailscape</a><p class="muted" style="max-width:34ch;margin:10px 0 0">Plan and book hikes in South Africa. We find the stays, check the dates and book on your behalf.</p></div>
       <div><h4>Plan</h4><a href="#map">Map</a><a href="#trails">Trails</a><a href="#stays">Stays</a></div>
-      <div><h4>Account</h4><a href="#trips">My trips</a><a href="#ops">Back office</a></div>
-      <div><h4>For owners</h4><a href="#ops">List your stay</a><a href="#ops">Owner calendar</a></div>
+      <div><h4>Account</h4><a href="#trips">My trips</a><a href="/admin.html" data-admin-link ${window.TSAccount && TSAccount.user && TSAccount.user.admin ? "" : "hidden"}>Back office</a></div>
+      <div><h4>Contact</h4><a href="mailto:hello@trailscape.co.za">hello@trailscape.co.za</a><a href="mailto:hello@trailscape.co.za?subject=List%20my%20stay%20on%20Trailscape">List your stay</a></div>
     </div>
     <div class="fine"><span>© 2026 Trailscape. Independent project, not affiliated with CapeNature or SANParks.</span><span>Pack light, book early, bring rusks.</span></div>
-    <p class="muted" style="font-size:.8rem;margin:14px 0 0">Photos from Unsplash photographers, credited on each image. Hero video by ${HERO_VIDEO.by} on Pexels.</p>
   </div></footer>`);
 }
 
@@ -351,7 +338,6 @@ function home() {
         </div>
       </div>
     </div>
-    <a class="credit" href="${HERO_VIDEO.page}" target="_blank" rel="noopener">${HERO_VIDEO.place} · Video: ${HERO_VIDEO.by} / Pexels</a>
   </section>
 
   <section class="band"><div class="wrap split">
@@ -395,9 +381,10 @@ function home() {
   </div></section>
 
   <section class="band alt"><div class="wrap">
-    <div class="eyebrow">Regions</div>
-    <h2 class="h2">${Object.keys(REGIONS).length} hiking regions, one map.</h2>
-    <div class="grid3" id="regions"></div>
+    <div class="rhead"><div><div class="eyebrow">Regions</div>
+      <h2 class="h2">${Object.keys(REGIONS).length} hiking regions, one map.</h2></div>
+      <div class="rnav"><button type="button" class="rbtn" id="rprev" aria-label="Previous regions">←</button><button type="button" class="rbtn" id="rnext" aria-label="More regions">→</button></div></div>
+    <div class="rcar" id="regions" tabindex="0" aria-label="Hiking regions"></div>
   </div></section>
 
   <section class="band"><div class="wrap">
@@ -426,6 +413,12 @@ function home() {
     const c = PLACES.filter(p => p.region === k).length;
     return `<a class="tile" href="#stays-${k}">${media(REGION_PHOTO[k], i % 3, i + 11, n)}<div class="body"><h3>${n}</h3><div class="meta"><span>${c} ${c === 1 ? "place" : "places"}</span></div><span class="go">Explore →</span></div></a>`;
   }).join("");
+  // Carousel: arrows scroll one tile at a time; swipe and trackpad scrolling work too.
+  const step = () => { const t = regEl.querySelector(".tile"); return t ? t.getBoundingClientRect().width + 18 : regEl.clientWidth; };
+  const arrows = () => { $("#rprev").disabled = regEl.scrollLeft < 4; $("#rnext").disabled = regEl.scrollLeft + regEl.clientWidth > regEl.scrollWidth - 4; };
+  $("#rprev").onclick = () => regEl.scrollBy({ left: -step(), behavior: "smooth" });
+  $("#rnext").onclick = () => regEl.scrollBy({ left: step(), behavior: "smooth" });
+  regEl.addEventListener("scroll", arrows, { passive: true }); arrows();
   const paint = () => {
     drawRidges($("#heroc"), 7);
     const fc = $("#featc"); if (fc) drawRidges(fc, 21, TILE_PAL[1]);
@@ -633,7 +626,7 @@ function book(id) {
     shell(`<div class="card panel">
       <div style="display:flex;justify-content:space-between;gap:12px;flex-wrap:wrap;align-items:baseline"><div><span class="muted" style="font-size:.85rem">Booking reference</span><div class="mono" style="font-size:1.2rem">${ref}</div></div><span class="tag info" id="stat-tag">In progress</span></div>
       <div class="track" id="trk">${evs.map((e, i) => `<div class="trk" data-i="${i}"><span class="dot"></span><div><b>${esc(e[0])}</b><span>${esc(e[1])}</span></div><time></time></div>`).join("")}</div>
-      <div style="display:flex;gap:10px;flex-wrap:wrap"><a class="btn line" href="#trips">View my trips</a><a class="btn line" href="#ops">See it in the back office</a></div></div>`);
+      <div style="display:flex;gap:10px;flex-wrap:wrap"><a class="btn line" href="#trips">View my trips</a></div></div>`);
     const limit = portal ? evs.length : 2; let i = 0;
     const tick = () => {
       document.querySelectorAll(".trk").forEach(r => { const k = +r.dataset.i; r.classList.toggle("done", k < i); r.classList.toggle("now", k === i && i < limit); if (k < i && !r.querySelector("time").textContent) r.querySelector("time").textContent = new Date().toTimeString().slice(0, 5); });
@@ -645,66 +638,10 @@ function book(id) {
   s1();
 }
 
-function trips() {
-  const all = [...myTrips, { ref: "LT-0988", place: "landdroskop", date: "2026-08-15", n: 3, total: 1020, past: true }];
-  view.innerHTML = `<div class="wrap phead"><div class="eyebrow">Account</div><h1>My trips</h1><p class="lead">Every booking, its status, and your alerts. Bookings you make in this prototype are kept in this browser only.</p></div>
-  <div class="wrap"><div class="list">${all.map(t => { const p = place(t.place); return `
-    <div class="row"><div><h3>${esc(p.name)}</h3><div class="meta"><span class="mono">${t.ref}</span><span>${fmtDate(t.date)}</span><span>${t.n} hikers</span></div></div>
-    <div class="right"><b>${R(t.total)}</b><span class="tag ${t.past ? "mute" : OPS[p.op].channel === "portal" ? "ok" : "warn"}">${t.past ? "Completed" : OPS[p.op].channel === "portal" ? "Confirmed" : "Waiting for operator"}</span></div></div>`; }).join("")}
-  ${myTrips.length ? "" : `<p class="muted" style="padding:18px 0 0">No new bookings yet. <a href="#map">Find a stay</a> to see one appear here.</p>`}</div>
-  <h2 style="font-size:1.4rem;margin-top:8px">Cancellation alerts</h2>
-  <div class="list">${Object.keys(store.get("alerts", {})).map(id => `<a class="row" href="#stay-${id}"><div><h3>${esc(place(id).name)}</h3><div class="meta"><span>Watching all dates</span></div></div><div class="right"><span class="tag info">Alert on</span></div></a>`).join("") || `<p class="muted">No alerts yet. Turn one on from any stay page.</p>`}</div></div>`;
-}
-
-function ops() {
-  const all = [...myTrips.slice(0, 3).map(t => ({ ref: t.ref, who: "You (prototype)", place: t.place, date: t.date, n: t.n, status: OPS[place(t.place).op].channel === "portal" ? "confirmed" : "email", channel: OPS[place(t.place).op].channel, age: "just now", log: [["now", "Request received, card hold placed"], ["now", OPS[place(t.place).op].channel === "portal" ? "Booked on portal (simulated)" : "Availability email drafted, awaiting approval"]], email: OPS[place(t.place).op].channel === "portal" ? null : { to: "bookings@operator.example", subj: `Booking request: ${t.n} hikers, ${fmtDate(t.date)}`, body: `Hi there,\n\nI'm writing from Trailscape on behalf of ${t.n} hikers who would like to book ${place(t.place).name} from ${fmtDate(t.date)}.\n\nCould you confirm availability, the total price, and your deposit and cancellation terms?\n\nThanks,\nTrailscape Bookings` } })), ...QUEUE];
-  if (!all.find(b => b.ref === opsSel)) opsSel = all[0].ref;
-  const sums = all.map(b => quote(place(b.place), b.n));
-  const gross = sums.reduce((a, q) => a + q.total, 0), fees = sums.reduce((a, q) => a + q.fee, 0), card = gross * CARD;
-  const needs = all.filter(b => b.status === "approve" || b.status === "email").length;
-  view.innerHTML = `<div class="ops">
-    <div class="opsmain">
-      <div class="eyebrow">Back office</div><h1 style="font-size:2rem">Booking queue</h1>
-      <div class="kpis">
-        <div class="card kpi"><small>Need your approval</small><b>${needs}</b></div>
-        <div class="card kpi"><small>Client payments</small><b>${R(gross)}</b></div>
-        <div class="card kpi"><small>Service fees</small><b>${R(fees)}</b></div>
-        <div class="card kpi"><small>Net after card fees</small><b>${R(fees - card)}</b><em> est. ${CARD * 100}% on full amount</em></div>
-      </div>
-      <div class="tablewrap"><table class="q"><thead><tr><th>Ref</th><th>Stay / trail</th><th>Client</th><th>Dates</th><th class="r">Hikers</th><th>Channel</th><th>Status</th><th class="r">Total</th></tr></thead>
-      <tbody>${all.map(b => { const p = place(b.place), q = quote(p, b.n); return `<tr data-ref="${b.ref}" class="${b.ref === opsSel ? "on" : ""}"><td class="mono">${b.ref}</td><td>${esc(p.name)}<div class="muted" style="font-size:.8rem">${OPS[p.op].label}</div></td><td>${esc(b.who)}</td><td>${fmtDate(b.date)}</td><td class="r">${b.n}</td><td>${chanIcon(b.channel)}</td><td><span class="tag ${STATUS[b.status][1]}">${STATUS[b.status][0]}</span></td><td class="r">${R(q.total)}</td></tr>`; }).join("")}</tbody></table></div>
-      <p class="muted" style="font-size:.85rem">Agents check online portals and draft emails automatically. Nothing is paid or sent without your approval while you're testing the process.</p>
-    </div>
-    <aside class="opsside" id="side"></aside></div>`;
-  view.querySelectorAll("tbody tr").forEach(tr => tr.onclick = () => { opsSel = tr.dataset.ref; view.querySelectorAll("tbody tr").forEach(x => x.classList.toggle("on", x === tr)); side(); });
-  function side() {
-    const b = all.find(x => x.ref === opsSel), p = place(b.place), q = quote(p, b.n), cf = q.total * CARD;
-    $("#side").innerHTML = `
-      <div><span class="mono muted">${b.ref} · ${b.age}</span><h2 style="font-size:1.4rem;margin-top:4px">${esc(p.name)}</h2><div class="muted" style="font-size:.9rem">${esc(b.who)} · ${b.n} hikers · ${fmtDate(b.date)}</div></div>
-      <span><span class="tag ${STATUS[b.status][1]}">${STATUS[b.status][0]}</span></span>
-      <div class="card" style="padding:14px"><div class="money">
-        <span class="muted">Client pays</span><span>${R(q.total)}</span>
-        <span class="muted">To ${OPS[p.op].label}</span><span>− ${R(q.provider)}</span>
-        <span class="muted">Card fee (est.)</span><span>− ${R(cf)}</span>
-        <span class="t2">Your margin</span><span class="t2">${R(q.fee - cf)}</span></div></div>
-      <div><div class="eyebrow" style="color:var(--muted)">Agent log</div><div class="log">${b.log.map(l => `<div><time>${esc(l[0])}</time><span>${esc(l[1])}</span></div>`).join("")}</div></div>
-      ${b.email ? `<div class="card email"><div class="hdr">To: ${esc(b.email.to)}<br>Subject: ${esc(b.email.subj)}</div>${esc(b.email.body)}</div>` : ""}
-      ${b.status === "approve" ? `<div style="display:grid;gap:8px"><button class="btn primary" id="act">Approve and pay ${R(q.provider)} with virtual card</button><button class="btn line" id="act2">Reject and release card hold</button></div>` : ""}
-      ${b.status === "email" ? `<div style="display:grid;gap:8px"><button class="btn primary" id="act">Approve and send email</button><button class="btn line" id="act2">Edit draft</button></div>` : ""}
-      ${b.status === "payout" ? `<button class="btn primary" id="act">Mark EFT payout as sent</button>` : ""}`;
-    const a = $("#act"), a2 = $("#act2");
-    if (a) a.onclick = () => {
-      const t = new Date().toTimeString().slice(0, 5);
-      if (b.status === "approve") { b.status = "confirmed"; b.log.push([t, `Paid ${R(q.provider)}, booking confirmed`], [t, "Card charged, confirmation sent to client"]); toast("Paid and confirmed"); }
-      else if (b.status === "email") { b.status = "waiting"; b.log.push([t, "Email sent"], [t, "Reminder scheduled in 48 h"]); b.email = null; toast("Email sent"); }
-      else if (b.status === "payout") { b.status = "confirmed"; b.log.push([t, "EFT payout marked as sent"]); toast("Payout recorded"); }
-      const tr = view.querySelector(`tr[data-ref="${b.ref}"] td:nth-child(7)`); if (tr) tr.innerHTML = `<span class="tag ${STATUS[b.status][1]}">${STATUS[b.status][0]}</span>`;
-      side();
-    };
-    if (a2) a2.onclick = () => toast(b.status === "approve" ? "Prototype: this would release the hold and notify the client." : "Prototype: editing opens here in the live version.");
-  }
-  side();
-}
+// My trips and the back office are drawn by booking.js and account.js (and the real back office is admin.html).
+// These placeholders only show for the moment before those scripts load.
+function trips() { view.innerHTML = `<div class="wrap phead"><div class="eyebrow">Account</div><h1>My trips</h1><p class="muted">One moment…</p></div>`; }
+function ops() { view.innerHTML = `<div class="wrap phead"><p class="muted">One moment…</p></div>`; }
 
 $("#menu").onclick = () => { const o = $("#links").classList.toggle("open"); $("#menu").setAttribute("aria-expanded", o); };
 window.addEventListener("hashchange", nav);

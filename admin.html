@@ -51,7 +51,6 @@ const R = n => n == null ? "–" : "R" + Math.round(n).toLocaleString("en-ZA").r
 const day = s => new Date(s + "T00:00:00Z").toLocaleDateString("en-ZA", { timeZone: "UTC", weekday: "short", day: "numeric", month: "short", year: "numeric" });
 const when = s => new Date(s).toLocaleString("en-ZA", { day: "numeric", month: "short", hour: "2-digit", minute: "2-digit" });
 const toast = t => { const d = document.createElement("div"); d.className = "toast"; d.textContent = t; document.body.appendChild(d); setTimeout(() => d.remove(), 2600); };
-let token = (() => { try { return sessionStorage.getItem("ts-admin") || ""; } catch { return ""; } })();
 let show = "open", sel = location.hash.slice(1) || null;
 
 const LABEL = {
@@ -61,29 +60,25 @@ const LABEL = {
 };
 const tag = s => { const [t, c] = LABEL[s] || [s, ""]; return `<span class="tag ${c}">${esc(t)}</span>`; };
 
+// Uses the admin account's sign-in (made on the site's My trips page); the session cookie goes with every request.
 async function api(path, opts = {}) {
-  const r = await fetch(API + path, { ...opts, headers: { Authorization: "Bearer " + token, ...(opts.body ? { "Content-Type": "application/json" } : {}) } });
+  const r = await fetch(API + path, { ...opts, credentials: "same-origin", headers: opts.body ? { "Content-Type": "application/json" } : {} });
   const data = await r.json().catch(() => ({}));
-  if (r.status === 401) { logout(); throw new Error(data.error || "Signed out"); }
+  if (r.status === 401) { signedOut(); throw new Error(data.error || "Signed out"); }
   if (!r.ok) throw new Error(data.error || "Request failed (" + r.status + ")");
   return data;
 }
-function logout() { token = ""; try { sessionStorage.removeItem("ts-admin"); } catch {} login(); }
-
-function login(msg) {
-  $("#app").innerHTML = `<form id="login"><h2>Trailscape back office</h2>
-    <label>Password<input id="pw" type="password" autocomplete="current-password" required autofocus></label>
-    <button class="primary">Sign in</button>${msg ? `<p class="err">${esc(msg)}</p>` : ""}</form>`;
-  $("#login").onsubmit = async e => {
-    e.preventDefault(); token = $("#pw").value;
-    try { await api("/queue"); try { sessionStorage.setItem("ts-admin", token); } catch {} shell(); } catch (err) { login(err.message); }
-  };
+async function logout() { try { await fetch("/api/auth/logout", { method: "POST", credentials: "same-origin" }); } catch {} location.href = "/"; }
+function signedOut() {
+  $("#app").innerHTML = `<div id="login"><h2>Trailscape back office</h2>
+    <p class="muted">This page is for the Trailscape admin account. Sign in on the site under My trips, then come back here.</p>
+    <a class="btn primary" href="/#trips" style="text-align:center;text-decoration:none">Sign in</a></div>`;
 }
 
 function shell() {
   $("#app").innerHTML = `<header><b>Trailscape back office</b><nav>
       <button data-show="open" aria-pressed="true">Needs action</button><button data-show="all" aria-pressed="false">Everything</button>
-      <button id="nblock">Block nights</button><button id="nstay">Stays &amp; prices</button><button id="out">Sign out</button></nav></header>
+      <button id="nblock">Block nights</button><button id="nstay">Stays &amp; prices</button><a class="btn" href="/" style="text-decoration:none">Site</a><button id="out">Sign out</button></nav></header>
     <main><section id="list"></section><aside id="side"><p class="muted">Pick an enquiry or booking.</p></aside></main>`;
   document.querySelectorAll("[data-show]").forEach(b => b.onclick = () => { show = b.dataset.show; document.querySelectorAll("[data-show]").forEach(x => x.setAttribute("aria-pressed", x === b)); queue(); });
   $("#out").onclick = logout; $("#nblock").onclick = blockForm; $("#nstay").onclick = staysForm;
@@ -199,8 +194,9 @@ function editStay(s) {
   };
 }
 
-window.addEventListener("hashchange", () => { const r = location.hash.slice(1); if (token && r && r !== sel) detail(r); });
-token ? shell() : login();
+let isAdmin = false;
+window.addEventListener("hashchange", () => { const r = location.hash.slice(1); if (isAdmin && r && r !== sel) detail(r); });
+fetch("/api/auth/me", { credentials: "same-origin" }).then(r => r.json()).then(d => { isAdmin = !!(d.user && d.user.admin); isAdmin ? shell() : signedOut(); }).catch(signedOut);
 </script>
 </body>
 </html>

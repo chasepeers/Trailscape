@@ -1,5 +1,6 @@
-// Runs before every /api/* request: back-office password check, and errors returned as JSON.
+// Runs before every /api/* request: same-site check on changes, back-office access, and errors returned as JSON.
 import { json, HttpError } from "../../lib/api.js";
+import { currentUser } from "../../lib/auth.js";
 
 async function timingSafeEqual(a, b) {
   const enc = new TextEncoder(), [ha, hb] = await Promise.all([a, b].map(s => crypto.subtle.digest("SHA-256", enc.encode(s))));
@@ -8,14 +9,25 @@ async function timingSafeEqual(a, b) {
   return diff === 0;
 }
 
-export async function onRequest({ request, env, next }) {
+export async function onRequest(context) {
+  const { request, env, next, data } = context;
   const url = new URL(request.url);
   try {
     if (!env.DB) throw new HttpError(503, "Database not connected");
+
+    // Anything that changes data must come from this site (stops other sites posting with a visitor's cookie).
+    if (!["GET", "HEAD", "OPTIONS"].includes(request.method)) {
+      const origin = request.headers.get("Origin");
+      if (origin && origin !== url.origin) throw new HttpError(403, "Requests must come from the Trailscape site");
+    }
+
     if (url.pathname.startsWith("/api/admin")) {
-      if (!env.ADMIN_TOKEN) throw new HttpError(503, "Back office not set up: add the ADMIN_TOKEN secret in Cloudflare");
+      // The admin account's signed-in session, or the ADMIN_TOKEN secret as a bearer token (for scripts).
+      const user = await currentUser(env.DB, request);
       const token = (request.headers.get("Authorization") || "").replace(/^Bearer\s+/i, "");
-      if (!token || !(await timingSafeEqual(token, env.ADMIN_TOKEN))) throw new HttpError(401, "Wrong or missing back-office password");
+      const tokenOk = !!(token && env.ADMIN_TOKEN && await timingSafeEqual(token, env.ADMIN_TOKEN));
+      if (!(user && user.role === "admin") && !tokenOk) throw new HttpError(401, "Please sign in with the Trailscape admin account");
+      data.admin = user ? user.email : "token";
     }
     return await next();
   } catch (err) {
