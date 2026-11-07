@@ -1,0 +1,202 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="robots" content="noindex, nofollow">
+<title>Trailscape back office</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&family=Fragment+Mono&display=swap" rel="stylesheet">
+<style>
+  :root { --fg: #0d1321; --muted: #6b7079; --band: #f4f4f4; --line: #e3e4e7; --ok: #00c44f; --okbg: #ccffe0; --warn: #8a5300; --warnbg: #fff0d4; --info: #1f5fb3; --infobg: #e3efff; --bad: #b42318; --badbg: #fde4e1; }
+  * { box-sizing: border-box; }
+  body { margin: 0; font: 15px/1.45 Inter, system-ui, sans-serif; letter-spacing: -0.01em; color: var(--fg); background: #fff; }
+  .mono { font-family: "Fragment Mono", ui-monospace, monospace; font-size: .85em; }
+  header { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 14px 20px; border-bottom: 1px solid var(--line); position: sticky; top: 0; background: #fff; z-index: 2; }
+  header b { font-weight: 600; } header nav { display: flex; gap: 6px; flex-wrap: wrap; }
+  button, .btn { font: inherit; border: 0; border-radius: 999px; padding: 7px 14px; background: var(--band); color: var(--fg); cursor: pointer; }
+  button.primary { background: var(--fg); color: #fff; } button[aria-pressed="true"] { background: var(--fg); color: #fff; } button:disabled { opacity: .45; cursor: default; }
+  input, select, textarea { font: inherit; border: 1px solid var(--line); border-radius: 8px; padding: 7px 10px; background: #fff; color: var(--fg); width: 100%; }
+  label { display: grid; gap: 4px; font-size: .85rem; color: var(--muted); }
+  main { display: grid; grid-template-columns: minmax(0, 1.4fr) minmax(320px, 1fr); min-height: calc(100vh - 60px); }
+  #list { padding: 16px 20px; border-right: 1px solid var(--line); overflow: auto; }
+  #side { padding: 16px 20px; display: grid; gap: 14px; align-content: start; }
+  .kpis { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 8px; margin-bottom: 14px; }
+  .kpi { background: var(--band); border-radius: 8px; padding: 10px 12px; } .kpi small { color: var(--muted); display: block; font-size: .78rem; } .kpi b { font-size: 1.3rem; font-weight: 500; }
+  table { width: 100%; border-collapse: collapse; font-size: .9rem; }
+  th { text-align: left; font-weight: 500; color: var(--muted); font-size: .78rem; padding: 6px 8px; border-bottom: 1px solid var(--line); }
+  td { padding: 9px 8px; border-bottom: 1px solid var(--band); vertical-align: top; } tr[data-ref] { cursor: pointer; } tr.on td { background: var(--band); }
+  td small { display: block; color: var(--muted); font-size: .78rem; } .r { text-align: right; white-space: nowrap; }
+  .tag { display: inline-block; border-radius: 999px; padding: 2px 9px; font-size: .76rem; white-space: nowrap; background: var(--band); }
+  .tag.ok { background: var(--okbg); color: #006b2c; } .tag.warn { background: var(--warnbg); color: var(--warn); } .tag.info { background: var(--infobg); color: var(--info); } .tag.bad { background: var(--badbg); color: var(--bad); }
+  .card { background: var(--band); border-radius: 8px; padding: 12px 14px; display: grid; gap: 8px; }
+  .row2 { display: flex; justify-content: space-between; gap: 10px; font-size: .9rem; } .row2 span:first-child { color: var(--muted); }
+  .grid2 { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+  .log { display: grid; gap: 6px; font-size: .85rem; } .log div { display: grid; grid-template-columns: 92px 1fr; gap: 8px; } .log time { color: var(--muted); }
+  h2 { font-size: 1.35rem; font-weight: 500; margin: 0; } h3 { font-size: 1rem; font-weight: 600; margin: 0; }
+  .muted { color: var(--muted); } .err { color: var(--bad); font-size: .88rem; }
+  #login { max-width: 360px; margin: 12vh auto; display: grid; gap: 12px; padding: 0 20px; }
+  .toast { position: fixed; bottom: 18px; left: 50%; transform: translateX(-50%); background: var(--fg); color: #fff; padding: 9px 16px; border-radius: 999px; font-size: .9rem; z-index: 9; }
+  @media (max-width: 860px) { main { grid-template-columns: 1fr; } #list { border-right: 0; border-bottom: 1px solid var(--line); } .kpis { grid-template-columns: repeat(2, 1fr); } }
+</style>
+</head>
+<body>
+<div id="app"></div>
+<script>
+"use strict";
+const API = "/api/admin";
+const $ = s => document.querySelector(s);
+const esc = s => String(s ?? "").replace(/[&<>"]/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
+const R = n => n == null ? "–" : "R" + Math.round(n).toLocaleString("en-ZA").replace(/[, ]/g, " ");
+const day = s => new Date(s + "T00:00:00Z").toLocaleDateString("en-ZA", { timeZone: "UTC", weekday: "short", day: "numeric", month: "short", year: "numeric" });
+const when = s => new Date(s).toLocaleString("en-ZA", { day: "numeric", month: "short", hour: "2-digit", minute: "2-digit" });
+const toast = t => { const d = document.createElement("div"); d.className = "toast"; d.textContent = t; document.body.appendChild(d); setTimeout(() => d.remove(), 2600); };
+let show = "open", sel = location.hash.slice(1) || null;
+
+const LABEL = {
+  new: ["New", "warn"], asked_operator: ["Asked operator", "info"], operator_replied: ["Operator replied", "warn"], offer_sent: ["Offer sent", "info"],
+  accepted: ["Accepted", "ok"], declined: ["Declined", ""], unavailable: ["Unavailable", ""], cancelled: ["Cancelled", ""],
+  received: ["To book", "warn"], booking_operator: ["Booking with operator", "info"], confirmed: ["Confirmed", "ok"], failed: ["Failed", "bad"],
+};
+const tag = s => { const [t, c] = LABEL[s] || [s, ""]; return `<span class="tag ${c}">${esc(t)}</span>`; };
+
+// Uses the admin account's sign-in (made on the site's My trips page); the session cookie goes with every request.
+async function api(path, opts = {}) {
+  const r = await fetch(API + path, { ...opts, credentials: "same-origin", headers: opts.body ? { "Content-Type": "application/json" } : {} });
+  const data = await r.json().catch(() => ({}));
+  if (r.status === 401) { signedOut(); throw new Error(data.error || "Signed out"); }
+  if (!r.ok) throw new Error(data.error || "Request failed (" + r.status + ")");
+  return data;
+}
+async function logout() { try { await fetch("/api/auth/logout", { method: "POST", credentials: "same-origin" }); } catch {} location.href = "/"; }
+function signedOut() {
+  $("#app").innerHTML = `<div id="login"><h2>Trailscape back office</h2>
+    <p class="muted">This page is for the Trailscape admin account. Sign in on the site under My trips, then come back here.</p>
+    <a class="btn primary" href="/#trips" style="text-align:center;text-decoration:none">Sign in</a></div>`;
+}
+
+function shell() {
+  $("#app").innerHTML = `<header><b>Trailscape back office</b><nav>
+      <button data-show="open" aria-pressed="true">Needs action</button><button data-show="all" aria-pressed="false">Everything</button>
+      <button id="nblock">Block nights</button><button id="nstay">Stays &amp; prices</button><a class="btn" href="/" style="text-decoration:none">Site</a><button id="out">Sign out</button></nav></header>
+    <main><section id="list"></section><aside id="side"><p class="muted">Pick an enquiry or booking.</p></aside></main>`;
+  document.querySelectorAll("[data-show]").forEach(b => b.onclick = () => { show = b.dataset.show; document.querySelectorAll("[data-show]").forEach(x => x.setAttribute("aria-pressed", x === b)); queue(); });
+  $("#out").onclick = logout; $("#nblock").onclick = blockForm; $("#nstay").onclick = staysForm;
+  queue(); if (sel) detail(sel);
+}
+
+async function queue() {
+  const el = $("#list");
+  try {
+    const { counts: c, items } = await api("/queue?show=" + show);
+    el.innerHTML = `<div class="kpis">
+        <div class="kpi"><small>Open enquiries</small><b>${c.open_enquiries}</b></div><div class="kpi"><small>Bookings to place</small><b>${c.open_bookings}</b></div>
+        <div class="kpi"><small>Confirmed value</small><b>${R(c.confirmed_value)}</b></div><div class="kpi"><small>Confirmed fees</small><b>${R(c.confirmed_fees)}</b></div></div>
+      ${items.length ? `<table><thead><tr><th>Ref</th><th>Stay</th><th>Guest</th><th>Dates</th><th class="r">Hikers</th><th>Status</th><th class="r">Total</th></tr></thead><tbody>
+      ${items.map(i => `<tr data-ref="${esc(i.ref)}" class="${i.ref === sel ? "on" : ""}"><td class="mono">${esc(i.ref)}<small>${i.type}</small></td>
+        <td>${esc(i.stay_name)}<small>${esc(i.operator)}</small></td><td>${esc(i.guest_name)}<small>${when(i.created_at)}</small></td>
+        <td>${esc(i.check_in)}<small>${i.nights} night${i.nights === 1 ? "" : "s"}</small></td><td class="r">${i.hikers}</td><td>${tag(i.status)}</td>
+        <td class="r">${i.type === "enquiry" && i.total ? "≈ " : ""}${R(i.total)}</td></tr>`).join("")}</tbody></table>`
+      : `<p class="muted">${show === "open" ? "Nothing needs action right now." : "No enquiries or bookings yet."}</p>`}`;
+    el.querySelectorAll("tr[data-ref]").forEach(tr => tr.onclick = () => detail(tr.dataset.ref));
+  } catch (err) { el.innerHTML = `<p class="err">${esc(err.message)}</p>`; }
+}
+
+async function detail(ref) {
+  sel = ref; history.replaceState(null, "", "#" + ref);
+  document.querySelectorAll("tr[data-ref]").forEach(tr => tr.classList.toggle("on", tr.dataset.ref === ref));
+  const side = $("#side"); side.innerHTML = `<p class="muted">Loading ${esc(ref)}…</p>`;
+  let d; try { d = await api("/requests/" + encodeURIComponent(ref)); } catch (err) { side.innerHTML = `<p class="err">${esc(err.message)}</p>`; return; }
+  const enq = d.type === "enquiry";
+  const statuses = enq ? ["new", "asked_operator", "operator_replied", "offer_sent", "accepted", "declined", "unavailable", "cancelled"] : ["received", "booking_operator", "confirmed", "cancelled", "failed"];
+  side.innerHTML = `
+    <div><span class="mono muted">${esc(d.ref)} · ${enq ? "Enquiry" : "Booking"}${d.source && d.source !== "instant" ? " from enquiry" : ""}</span><h2>${esc(d.stay_name)}</h2>
+      <div class="muted">${esc(d.operator)} · ${day(d.check_in)} → ${day(d.check_out)} · ${d.nights} night${d.nights === 1 ? "" : "s"} · ${d.hikers} hiker${d.hikers === 1 ? "" : "s"}${enq && d.flexible ? " · dates flexible" : ""}</div></div>
+    <div>${tag(d.status)} ${!enq ? `<span class="tag ${d.payment_status === "paid" ? "ok" : d.payment_status === "stub" ? "warn" : ""}">Payment: ${esc(d.payment_status)}</span>` : ""}</div>
+    <div class="card"><h3>Guest</h3><div>${esc(d.guest_name)}</div><div><a href="mailto:${esc(d.guest_email)}?subject=${encodeURIComponent("Trailscape " + d.ref + ": " + d.stay_name)}">${esc(d.guest_email)}</a> · <a href="tel:${esc(d.guest_phone)}">${esc(d.guest_phone)}</a></div>
+      ${d.notes ? `<div class="muted">“${esc(d.notes)}”</div>` : ""}</div>
+    <div class="card"><h3>Operator</h3><div>${esc(d.operator)}${d.engine ? ` · ${esc(d.engine)}${d.stay_engine_ref ? " #" + esc(d.stay_engine_ref) : ""}` : ""}</div>
+      <div>${d.booking_email ? `<a href="mailto:${esc(d.booking_email)}">${esc(d.booking_email)}</a>` : `<span class="muted">No email on file</span>`}${d.booking_phone ? " · " + esc(d.booking_phone) : ""}</div>
+      <div class="muted" style="font-size:.85rem">Rate on file ${R(d.price_pp)} pp/night${d.price_estimated ? " (estimate)" : ""}</div></div>
+    <div class="card">${enq ? `
+      <div class="row2"><span>Guide total shown</span><span>${R(d.guide_total)}</span></div>
+      ${d.quoted_stay != null ? `<div class="row2"><span>Quoted</span><span>${R(d.quoted_stay)} + fee ${R(d.quoted_fee)} = ${R(d.quoted_stay + d.quoted_fee)}</span></div>` : ""}
+      ${d.booking_ref ? `<div class="row2"><span>Booking</span><span><a href="#${esc(d.booking_ref)}" id="golink" class="mono">${esc(d.booking_ref)}</a></span></div>` : ""}` : `
+      <div class="row2"><span>Stay fees</span><span>${R(d.stay_fees)}</span></div><div class="row2"><span>Trailscape fee</span><span>${R(d.service_fee)}</span></div>
+      <div class="row2"><span><b>Total</b></span><span><b>${R(d.total)}</b></span></div>
+      ${d.client_total != null && d.client_total !== d.total ? `<div class="err">Site showed ${R(d.client_total)}</div>` : ""}
+      ${d.engine_ref ? `<div class="row2"><span>Operator ref</span><span class="mono">${esc(d.engine_ref)}</span></div>` : ""}`}</div>
+    <form class="card" id="upd"><h3>Update</h3>
+      <div class="grid2"><label>Status<select id="u-status">${statuses.map(s => `<option value="${s}" ${s === d.status ? "selected" : ""}>${esc((LABEL[s] || [s])[0])}</option>`).join("")}</select></label>
+      ${enq ? `<label>Operator price (stay fees)<input id="u-quote" type="number" min="0" step="1" value="${d.quoted_stay ?? ""}" placeholder="e.g. 9440"></label>`
+            : `<label>Operator reference<input id="u-eref" value="${esc(d.engine_ref || "")}"></label>`}</div>
+      ${enq ? "" : `<label>Payment<select id="u-pay">${["none", "stub", "held", "paid", "refunded", "failed"].map(s => `<option ${s === d.payment_status ? "selected" : ""}>${s}</option>`).join("")}</select></label>`}
+      <label>Note for the log<textarea id="u-note" rows="2"></textarea></label>
+      ${enq ? `<span class="muted" style="font-size:.8rem">Setting “Accepted” creates the booking at the operator price and holds the beds.</span>` : `<span class="muted" style="font-size:.8rem">Cancelled or failed frees the beds.</span>`}
+      <button class="primary">Save</button><p class="err" id="u-err"></p></form>
+    <div><h3 style="margin-bottom:6px">Log</h3><div class="log">${d.log.map(l => `<div><time>${when(l.at)}</time><span>${esc(l.text)} <span class="muted">· ${esc(l.actor)}</span></span></div>`).join("")}</div></div>`;
+  if ($("#golink")) $("#golink").onclick = e => { e.preventDefault(); detail(d.booking_ref); };
+  $("#upd").onsubmit = async e => {
+    e.preventDefault();
+    const body = {};
+    const st = $("#u-status").value; if (st !== d.status) body.status = st;
+    if (enq) { const q = $("#u-quote").value; if (q !== "" && +q !== d.quoted_stay) body.quotedStay = +q; }
+    else { const r = $("#u-eref").value.trim(); if (r !== (d.engine_ref || "")) body.engineRef = r; const p = $("#u-pay").value; if (p !== d.payment_status) body.paymentStatus = p; }
+    const n = $("#u-note").value.trim(); if (n) body.note = n;
+    if (!Object.keys(body).length) { $("#u-err").textContent = "Nothing changed."; return; }
+    try { const res = await api("/requests/" + encodeURIComponent(d.ref), { method: "POST", body: JSON.stringify(body) }); toast(res.createdBooking ? "Booking " + res.createdBooking + " created" : "Saved"); queue(); detail(d.ref); }
+    catch (err) { $("#u-err").textContent = err.message; }
+  };
+}
+
+function blockForm() {
+  sel = null; history.replaceState(null, "", location.pathname);
+  $("#side").innerHTML = `<form class="card" id="bf"><h3>Block nights</h3><p class="muted" style="margin:0;font-size:.85rem">For nights the owner has taken elsewhere. Guests see them as booked.</p>
+    <label>Stay ID<input id="b-stay" required placeholder="e.g. WC-009 or whale"></label>
+    <div class="grid2"><label>First night<input id="b-from" type="date" required></label><label>Free again from<input id="b-to" type="date" required></label></div>
+    <label>Beds (empty = whole stay)<input id="b-beds" type="number" min="1"></label><label>Note<input id="b-note" placeholder="e.g. owner's family weekend"></label>
+    <button class="primary">Block</button><p class="err" id="b-err"></p></form>`;
+  $("#bf").onsubmit = async e => {
+    e.preventDefault();
+    const body = { stayId: $("#b-stay").value.trim(), from: $("#b-from").value, to: $("#b-to").value, note: $("#b-note").value.trim() };
+    if ($("#b-beds").value) body.beds = +$("#b-beds").value;
+    try { const r = await api("/blocks", { method: "POST", body: JSON.stringify(body) }); toast(r.nights + " night(s) blocked"); } catch (err) { $("#b-err").textContent = err.message; }
+  };
+}
+
+async function staysForm() {
+  sel = null; history.replaceState(null, "", location.pathname);
+  $("#side").innerHTML = `<div class="card"><h3>Stays &amp; prices</h3><label>Search<input id="s-q" placeholder="Name, ID or operator"></label></div><div id="s-list"></div>`;
+  const draw = async () => {
+    try {
+      const rows = await api("/stays?q=" + encodeURIComponent($("#s-q").value.trim()));
+      $("#s-list").innerHTML = `<table><tbody>${rows.slice(0, 60).map(s => `<tr data-id="${esc(s.id)}"><td>${esc(s.name)}<small class="mono">${esc(s.id)} · ${esc(s.operator)}</small></td>
+        <td>${s.mode === "instant" ? `<span class="tag ok">Instant</span>` : `<span class="tag info">Enquiry</span>`}</td><td class="r">${R(s.price_pp)}<small>${s.price_estimated ? "estimate" : "real rate"}</small></td></tr>`).join("")}</tbody></table>`;
+      $("#s-list").querySelectorAll("tr").forEach(tr => tr.onclick = () => editStay(rows.find(s => s.id === tr.dataset.id)));
+    } catch (err) { $("#s-list").innerHTML = `<p class="err">${esc(err.message)}</p>`; }
+  };
+  let t; $("#s-q").oninput = () => { clearTimeout(t); t = setTimeout(draw, 250); }; draw();
+}
+function editStay(s) {
+  $("#side").innerHTML = `<form class="card" id="sf"><span class="mono muted">${esc(s.id)}</span><h3>${esc(s.name)}</h3>
+    <div class="grid2"><label>Price pp per night<input id="e-price" type="number" min="1" value="${s.price_pp}"></label><label>Beds<input id="e-beds" type="number" min="1" value="${s.beds}"></label></div>
+    <div class="grid2"><label>Booking<select id="e-mode"><option value="enquiry" ${s.mode === "enquiry" ? "selected" : ""}>On enquiry</option><option value="instant" ${s.mode === "instant" ? "selected" : ""}>Instant</option></select></label>
+    <label>Engine property ID<input id="e-eref" value="${esc(s.engine_ref || "")}"></label></div>
+    <div class="grid2"><label>Booking email<input id="e-email" type="email" value="${esc(s.booking_email || "")}"></label><label>Booking phone<input id="e-phone" value="${esc(s.booking_phone || "")}"></label></div>
+    <span class="muted" style="font-size:.8rem">${s.price_estimated ? "The price is still an estimate. Saving a price marks it as the real rate." : "Real rate on file."} Changing instant/enquiry here doesn't change the site yet: the site's list is in booking.js.</span>
+    <div style="display:flex;gap:8px"><button class="primary">Save</button><button type="button" id="e-back">Back</button></div><p class="err" id="e-err"></p></form>`;
+  $("#e-back").onclick = staysForm;
+  $("#sf").onsubmit = async e => {
+    e.preventDefault();
+    const body = { beds: +$("#e-beds").value, mode: $("#e-mode").value, engineRef: $("#e-eref").value.trim(), bookingEmail: $("#e-email").value.trim(), bookingPhone: $("#e-phone").value.trim() };
+    if (+$("#e-price").value !== s.price_pp || s.price_estimated === 0) body.pricePp = +$("#e-price").value;
+    try { const r = await api("/stays/" + encodeURIComponent(s.id), { method: "PATCH", body: JSON.stringify(body) }); toast("Saved"); editStay(r); } catch (err) { $("#e-err").textContent = err.message; }
+  };
+}
+
+let isAdmin = false;
+window.addEventListener("hashchange", () => { const r = location.hash.slice(1); if (isAdmin && r && r !== sel) detail(r); });
+fetch("/api/auth/me", { credentials: "same-origin" }).then(r => r.json()).then(d => { isAdmin = !!(d.user && d.user.admin); isAdmin ? shell() : signedOut(); }).catch(signedOut);
+</script>
+</body>
+</html>

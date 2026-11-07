@@ -29,12 +29,49 @@ site until November 2026.
 
 - `index.html`: page shell, styles and navigation
 - `app.js`: loader (loads `home.css`, then the scripts below in order)
-- `app-core.js`: main app (pages, booking flow, back office)
+- `app-core.js`: main app (pages, front page, map)
+- `account.js`: sign in / sign up on My trips, admin-only Back office link
 - `stays.js`, `stays-data.js`: accommodation layer and listings
 - `hiking-areas.js`: shaded hiking-area outlines
 - `map-layers.js`: map layer panel, trails, side-panel sections
 - `booking.js`: on-site booking with availability calendar
 - `home.css`: front page hero styles
+- `admin.html`: back office for enquiries, bookings, blocked nights and stay prices
+
+## Back end (bookings API)
+
+Cloudflare Pages Functions in `functions/api/`, with shared code in `lib/api.js` and a D1 database (`trailscape`,
+bound as `DB` in `wrangler.toml`). The site calls it through `window.HS_CONFIG = { apiBase: "/api" }` in `index.html`.
+
+| Endpoint | Used by |
+| --- | --- |
+| `GET /api/availability?stay=&from=&to=` | calendar for instant-booking stays |
+| `GET /api/booked?stay=&from=&to=` | calendar for enquiry stays (nights already taken) |
+| `POST /api/enquiries` | enquiry form |
+| `POST /api/bookings` | instant booking (payment is a stub until a gateway is chosen) |
+| `GET /api/health` | quick check that the database is connected |
+| `/api/auth/*`, `/api/me/trips` | sign in / sign up and My trips |
+| `/api/admin/*` | back office at `/admin.html` (admin account, or the `ADMIN_TOKEN` secret for scripts) |
+
+Prices are recalculated on the server; the browser's quote is only kept for comparison.
+
+**Accounts** (`functions/api/auth/`, `lib/auth.js`, `account.js`): sign-in and sign-up live on the My trips page only.
+Hikers get a 6-digit code by email (Resend, `RESEND_API_KEY`); codes last 10 minutes, 5 tries, 5 codes an hour.
+The admin account (hello@trailscape.co.za) signs in with a password instead and is the only one that sees the
+Back office link. To set or reset its password: `ADMIN_PASSWORD='…' node scripts/make-admin.mjs` and run the output in
+the D1 console. My trips lists every enquiry and booking made with the signed-in email address (`/api/me/trips`).
+For local testing, `DEV_EMAIL_LOG=1` in `.dev.vars` prints codes in the server log instead of emailing them.
+
+**Secrets** (Cloudflare → Workers & Pages → trailscape → Settings → Variables and Secrets, for Production and Preview):
+`RESEND_API_KEY` (required for sign-in codes and booking emails) and `ADMIN_TOKEN` (optional, for scripts).
+
+**Database changes:** add a numbered file to `migrations/` and apply it with
+`npx wrangler d1 migrations apply trailscape --remote`. `node scripts/make-seed.mjs` rebuilds `seed/stays.sql` from the
+site's stay data; running it again refreshes names and estimates but keeps real rates entered in the back office.
+
+**Local testing:** `node build-trails.mjs`, then `npx wrangler d1 migrations apply trailscape --local`,
+`npx wrangler d1 execute trailscape --local --file seed/stays.sql`, put `ADMIN_TOKEN=...` in `.dev.vars`, and run
+`npx wrangler pages dev public`.
 
 ## Map tiles
 

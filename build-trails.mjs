@@ -108,7 +108,7 @@ async function main() {
 function publish() {
   const root = new URL("./", import.meta.url), out = new URL("./public/", import.meta.url);
   mkdirSync(out, { recursive: true });
-  const skip = new Set(["build-trails.mjs", "trail-ids.json", "vercel.json", "package.json", "package-lock.json", "README.md"]);
+  const skip = new Set(["build-trails.mjs", "trail-ids.json", "vercel.json", "package.json", "package-lock.json", "README.md", "wrangler.toml"]);
   for (const f of readdirSync(root)) {
     if (skip.has(f) || f.startsWith(".") || !statSync(new URL(f, root)).isFile()) continue;
     copyFileSync(new URL(f, root), new URL(f, out));

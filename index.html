@@ -470,8 +470,6 @@ footer h4 { text-transform: none; letter-spacing: -0.02em; font-size: .875rem; f
       <a href="#trails" data-r="trails">Trails</a>
       <a href="#stays" data-r="stays">Stays</a>
       <a href="#trips" data-r="trips">My trips</a>
-      <a href="#ops" data-r="ops">Back office</a>
-      <a href="#trips" data-r="signin">Sign in</a>
     </div>
     <button class="btn line sm menu-btn" id="menu" aria-label="Menu" aria-expanded="false">Menu</button>
   </div>
@@ -480,6 +478,10 @@ footer h4 { text-transform: none; letter-spacing: -0.02em; font-size: .875rem; f
 <main id="view"></main>
 
 <script src="https://unpkg.com/maplibre-gl@4.7.1/dist/maplibre-gl.js"></script>
+<script>
+  // Booking API (Cloudflare Pages Functions in functions/api/). payments: false until a payment gateway is connected.
+  window.HS_CONFIG = { apiBase: "/api", payments: false };
+</script>
 <script src="app.js"></script>
 <script>
 // Header sits transparently over the hero on the home page and turns solid white once you scroll.

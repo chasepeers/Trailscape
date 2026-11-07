@@ -1,0 +1,20 @@
+# Cloudflare Pages config for Trailscape. With this file in the repo, Pages takes its bindings from here
+# (the dashboard's binding settings become read-only). Build command and branches stay in the dashboard.
+name = "trailscape"
+pages_build_output_dir = "public"
+compatibility_date = "2026-11-01"
+
+# The bookings database. Migrations live in migrations/ (apply with wrangler d1 migrations apply trailscape --remote).
+[[d1_databases]]
+binding = "DB"
+database_name = "trailscape"
+database_id = "740c8044-5fe6-4090-913e-2307fc2b40f0"
+migrations_dir = "migrations"
+
+[vars]
+NOTIFY_TO = "hello@trailscape.co.za"
+MAIL_FROM = "Trailscape <hello@trailscape.co.za>"
+
+# Secrets (set in the dashboard under Settings → Variables and Secrets, never in this file):
+#   ADMIN_TOKEN     back-office password
+#   RESEND_API_KEY  optional, turns on emails
