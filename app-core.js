@@ -74,8 +74,13 @@ function media(k, pal, seed, alt) {
   return `<canvas data-pal="${pal}" data-seed="${seed}" aria-hidden="true"></canvas>`;
 }
 const MEDIA_CSS = `
-.hero video { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; opacity: 0; transition: opacity 1.1s ease; }
+.hero video { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; opacity: 0; transition: opacity 1.2s ease; z-index: 0; }
 .hero video.on { opacity: 1; }
+.hero video.front { z-index: 1; }
+.hero #heroc { visibility: hidden; }
+.hero.still #heroc { visibility: visible; }
+.hero .shade { z-index: 2; }
+.hero .herowrap, .hero .credit { z-index: 3; }
 .hero .shade { position: absolute; inset: 0; pointer-events: none; background: linear-gradient(180deg, rgba(13,19,33,.18) 0%, rgba(13,19,33,0) 22%, rgba(255,255,255,0) 50%, rgba(255,255,255,.75) 80%, #fff 100%); }
 .hero .credit { position: absolute; right: max(16px, env(safe-area-inset-right, 0px)); bottom: 12px; font-size: .75rem; color: var(--muted); text-decoration: none; z-index: 1; }
 .hero .credit:hover { color: var(--fg); }
@@ -284,24 +289,56 @@ function footer() {
   </div></footer>`);
 }
 
+// Hero video: two stacked copies of the same clip. Near the end of one, the other starts from
+// the beginning and fades in on top, so there is always a video frame on screen and the
+// drawn ridgelines never show through. The drawn art is only used when the video can't play.
 function startHeroVideo() {
-  const v = $("#herov"); if (!v) return;
+  const hero = $(".hero"), vids = [...document.querySelectorAll(".hero .herov")];
+  if (!hero || !vids.length) return;
+  const still = () => hero.classList.add("still");
   const calm = matchMedia("(prefers-reduced-motion: reduce)").matches || (navigator.connection && navigator.connection.saveData);
-  if (calm) return; // keep the drawn ridgelines for people who prefer less motion or save data
-  v.src = heroSrc();
-  const show = () => v.classList.add("on");
-  v.addEventListener("playing", show);
-  // Soft loop: fade out just before the end, restart, fade back in.
-  v.addEventListener("timeupdate", () => { if (v.duration && v.duration - v.currentTime < 0.9) v.classList.remove("on"); });
-  v.addEventListener("ended", () => { v.currentTime = 0; v.play().catch(() => {}); });
-  v.play().catch(() => {});
+  if (calm) return still(); // drawn ridgelines for people who prefer less motion or save data
+  const FADE = 1.2; // seconds; matches the CSS opacity transition
+  const src = heroSrc();
+  let cur = vids[0], next = vids[1], swapping = false;
+  // If the video hasn't started after a few seconds (slow or blocked network), show the drawn art.
+  const slow = setTimeout(still, 6000);
+  cur.addEventListener("error", () => { clearTimeout(slow); still(); });
+  cur.addEventListener("playing", () => {
+    clearTimeout(slow);
+    cur.classList.add("on", "front");
+    if (next && !next.src) { next.src = src; next.load(); } // buffer the second copy once the first is playing
+  }, { once: true });
+  function swap() {
+    swapping = true;
+    next.currentTime = 0;
+    next.play().then(() => {
+      next.classList.add("front", "on");
+      cur.classList.remove("front");
+      setTimeout(() => {
+        cur.classList.remove("on"); cur.pause();
+        [cur, next] = [next, cur]; swapping = false;
+      }, FADE * 1000 + 150);
+    }).catch(() => { swapping = false; });
+  }
+  vids.forEach(v => {
+    v.addEventListener("timeupdate", () => {
+      if (v !== cur || swapping || !next || !v.duration) return;
+      if (v.duration - v.currentTime < FADE + 0.3) swap();
+    });
+    // Fallback if the crossfade couldn't start: restart in place without fading out.
+    v.addEventListener("ended", () => { if (v === cur && !swapping) { v.currentTime = 0; v.play().catch(() => {}); } });
+  });
+  cur.src = src;
+  cur.play().catch(() => {});
 }
 
 function home() {
   const feat = ["whale", "otter", "cogh"];
   view.innerHTML = `
   <section class="hero"><canvas id="heroc" aria-hidden="true"></canvas>
-    <video id="herov" muted playsinline preload="auto" aria-hidden="true"></video>
+    <video id="herov" class="herov" muted playsinline preload="auto" aria-hidden="true"></video>
+    <video class="herov" muted playsinline preload="auto" aria-hidden="true"></video>
     <div class="shade"></div>
     <div class="wrap herowrap">
       <div class="herocard">
