@@ -81,6 +81,7 @@ const PHOTOS = {
   paternoster: { id: "photo-1720206811929-594dc6483578", by: "Grant Durr", where: "Paternoster" },
   franschhoek: { id: "photo-1741338898082-f0d1484d24f8", by: "Hendrik Prinsloo", where: "Franschhoek Pass, Hottentots Holland mountains" },
   ceres: { id: "photo-1563656410378-e5c283afafbc", by: "Brent Ninaber", where: "Snow on the mountains around Ceres" },
+  farmstay: { id: "photo-1740021823523-d88913c9c3b7", by: "Doug Bagg", where: "A white farm building below the mountains near Franschhoek" },
 };
 const PLACE_PHOTO = { whale: "dehoop", otter: "storms", cogh: "capepoint", outeniqua: "george", swellendam: "swellendam", swartberg: "swartberg", sneeuberg: "cederberg", heritage: "cederberg", sanddrif: "cederberg", fivebay: "paternoster" };
 const REGION_PHOTO = { cederberg: "cederberg", garden: "george", overberg: "swellroad", karoo: "swartberg", hh: "franschhoek", peninsula: "tablemtn", breede: "ceres", west: "paternoster" };
@@ -384,16 +385,16 @@ function home() {
   <section class="band"><div class="wrap">
     <div class="feature">
       <div>
-        <div class="eyebrow">Sold out?</div>
-        <h2 class="h2">Get the cancellation, not the waitlist.</h2>
+        <div class="eyebrow">Easy enquire</div>
+        <h2 class="h2">The best huts don't have a booking button.</h2>
         <ul>
-          <li>Tell us your trail and the dates that work.</li>
-          <li>We watch for released beds and alert you first.</li>
-          <li>Tap once and we book it before it's gone.</li>
+          <li>Most private and community stays only take bookings by email, if you can even find the address.</li>
+          <li>Send us your dates in a minute and we contact the stay on your behalf.</li>
+          <li>We come back with availability and the exact price. You pay only once it's confirmed.</li>
         </ul>
-        <a class="btn primary" href="#stay-whale">Set an alert on the Whale Trail</a>
+        <a class="btn primary" href="#stays-enquire">Find an Easy enquire stay</a>
       </div>
-      ${media("swellendam", 1, 21, "Clouds over the Langeberg near Swellendam")}
+      ${media("farmstay", 1, 21, "A white farm building below the mountains near Franschhoek")}
     </div>
   </div></section>
 

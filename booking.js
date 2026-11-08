@@ -689,7 +689,7 @@
 
   // ---------- stays list: every stay, Instant booking or Easy enquire ----------
   huts = function (regionArg) {
-    const f = { mode: null, region: REG[regionArg] ? regionArg : null, q: "", show: 40, sort: "name" };
+    const f = { mode: regionArg === "enquire" ? "enquiry" : regionArg === "instant" ? "instant" : null, region: REG[regionArg] ? regionArg : null, q: "", show: 40, sort: "name" };
     const regions = [...new Set(allU().map(u => u.regionKey))].sort((a, b) => REG[a].localeCompare(REG[b]));
     view.innerHTML = `
     <div class="wrap phead"><div class="eyebrow">Stays &amp; cabins</div><h1>Every overnight stay, one list.</h1>
@@ -702,7 +702,7 @@
     </div>
     <div class="wrap"><div class="list" id="hl"></div><div class="hsmore" id="hmore"></div></div>`;
     const fo = $("#f-ops");
-    fo.innerHTML = `<button class="chip" aria-pressed="true" data-mode="">All</button>` + Object.entries(BOOK_MODES).map(([k, b]) => `<button class="chip" aria-pressed="false" data-mode="${k}" style="--c:${b.c}"><i></i>${b.label}</button>`).join("");
+    fo.innerHTML = `<button class="chip" aria-pressed="${!f.mode}" data-mode="">All</button>` + Object.entries(BOOK_MODES).map(([k, b]) => `<button class="chip" aria-pressed="${f.mode === k}" data-mode="${k}" style="--c:${b.c}"><i></i>${b.label}</button>`).join("");
     fo.querySelectorAll(".chip").forEach(b => b.onclick = () => { f.mode = b.dataset.mode || null; f.show = 40; fo.querySelectorAll(".chip").forEach(x => x.setAttribute("aria-pressed", x === b)); draw(); });
     $("#f-region").onchange = e => { f.region = e.target.value || null; f.show = 40; draw(); };
     $("#f-sort").onchange = e => { f.sort = e.target.value; draw(); };
