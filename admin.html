@@ -171,7 +171,7 @@ async function staysForm() {
     try {
       const rows = await api("/stays?q=" + encodeURIComponent($("#s-q").value.trim()));
       $("#s-list").innerHTML = `<table><tbody>${rows.slice(0, 60).map(s => `<tr data-id="${esc(s.id)}"><td>${esc(s.name)}<small class="mono">${esc(s.id)} · ${esc(s.operator)}</small></td>
-        <td>${s.mode === "instant" ? `<span class="tag ok">Instant</span>` : `<span class="tag info">Enquiry</span>`}</td><td class="r">${R(s.price_pp)}<small>${s.price_estimated ? "estimate" : "real rate"}</small></td></tr>`).join("")}</tbody></table>`;
+        <td>${s.mode === "instant" ? `<span class="tag ok">Instant</span>` : `<span class="tag info">Easy enquire</span>`}</td><td class="r">${R(s.price_pp)}<small>${s.price_estimated ? "estimate" : "real rate"}</small></td></tr>`).join("")}</tbody></table>`;
       $("#s-list").querySelectorAll("tr").forEach(tr => tr.onclick = () => editStay(rows.find(s => s.id === tr.dataset.id)));
     } catch (err) { $("#s-list").innerHTML = `<p class="err">${esc(err.message)}</p>`; }
   };
@@ -180,10 +180,10 @@ async function staysForm() {
 function editStay(s) {
   $("#side").innerHTML = `<form class="card" id="sf"><span class="mono muted">${esc(s.id)}</span><h3>${esc(s.name)}</h3>
     <div class="grid2"><label>Price pp per night<input id="e-price" type="number" min="1" value="${s.price_pp}"></label><label>Beds<input id="e-beds" type="number" min="1" value="${s.beds}"></label></div>
-    <div class="grid2"><label>Booking<select id="e-mode"><option value="enquiry" ${s.mode === "enquiry" ? "selected" : ""}>On enquiry</option><option value="instant" ${s.mode === "instant" ? "selected" : ""}>Instant</option></select></label>
+    <div class="grid2"><label>Booking<select id="e-mode"><option value="enquiry" ${s.mode === "enquiry" ? "selected" : ""}>Easy enquire</option><option value="instant" ${s.mode === "instant" ? "selected" : ""}>Instant booking</option></select></label>
     <label>Engine property ID<input id="e-eref" value="${esc(s.engine_ref || "")}"></label></div>
     <div class="grid2"><label>Booking email<input id="e-email" type="email" value="${esc(s.booking_email || "")}"></label><label>Booking phone<input id="e-phone" value="${esc(s.booking_phone || "")}"></label></div>
-    <span class="muted" style="font-size:.8rem">${s.price_estimated ? "The price is still an estimate. Saving a price marks it as the real rate." : "Real rate on file."} Changing instant/enquiry here doesn't change the site yet: the site's list is in booking.js.</span>
+    <span class="muted" style="font-size:.8rem">${s.price_estimated ? "The price is still an estimate. Saving a price marks it as the real rate." : "Real rate on file."} The site sets the booking type itself: CapeNature, SANParks and NightsBridge stays (NIGHTSBRIDGE in app-core.js) are Instant booking, the rest Easy enquire. Keep this in step.</span>
     <div style="display:flex;gap:8px"><button class="primary">Save</button><button type="button" id="e-back">Back</button></div><p class="err" id="e-err"></p></form>`;
   $("#e-back").onclick = staysForm;
   $("#sf").onsubmit = async e => {

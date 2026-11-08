@@ -3,12 +3,12 @@
 // gets a stay page (#stay-<id>) and a booking flow (#book-<id>) on this site. Nothing links out to operator or listing sites.
 // It replaces app-core.js's hut(), huts(), book() and trips() pages, and turns the map's accommodation card into a booking card.
 //
-// ---- Two ways to book ----
-// Instant booking: stays connected through NightsBridge (INSTANT below). The calendar shows live availability and the guest
-//   books and pays on this site.
-// On enquiry: every other stay. The calendar only greys out nights that Trailscape has already booked there; every other
-//   night shows "availability on enquiry". The guest sends an enquiry with their preferred dates, no payment is taken, and we
-//   reply once the operator confirms availability and price.
+// ---- Two ways to book (bookMode() and BOOK_MODES in app-core.js) ----
+// Instant booking: CapeNature, SANParks and NightsBridge stays, where we book straight into the provider's calendar.
+//   The calendar shows availability and the guest pays when booking: in full, or a deposit where the stay takes one.
+// Easy enquire: every other stay. We email the stay on the guest's behalf. The calendar only greys out nights that
+//   Trailscape has already booked there; the guest sends their preferred dates, nothing is charged, and they pay once
+//   the stay confirms availability and the exact price.
 //
 // ---- Connecting the backend (later) ----
 // Option A: set the API address before app.js loads, e.g. in index.html:
@@ -19,7 +19,7 @@
 //        → [{ "date": "2027-02-12", "bedsBooked": 6 }]        (only nights with bookings; a whole-unit stay can send bedsBooked = its beds)
 //   POST {apiBase}/bookings    (JSON body: see the booking payload below)   → { "ref": "HS-1050", "status": "confirmed" }
 //   POST {apiBase}/enquiries   (JSON body: see the enquiry payload below)   → { "ref": "HS-1051", "status": "enquiry" }
-//   HS_CONFIG.instant = ["WC-…"] adds more instant-booking stays without editing this file.
+//   HS_CONFIG.instant = ["WC-…"] adds more NightsBridge (instant-booking) stays without editing app-core.js.
 // Option B: assign window.HS_BACKEND = { getAvailability, getBooked, createBooking, createEnquiry } (each returns a promise).
 // With neither, sample data is generated in the browser so the whole flow can be tried out, and it is labelled as a sample.
 (() => {
@@ -40,10 +40,6 @@
   const addMonths = (s, n) => { const d = toD(monthStart(s)); d.setUTCMonth(d.getUTCMonth() + n); return toS(d); };
   const MAX_NIGHTS = 14;
 
-  // ---------- which stays take instant bookings ----------
-  // Stays whose own booking engine is NightsBridge (see claude/booking-systems.csv in the project). Everything else is on enquiry.
-  const INSTANT = new Set(["WC-056", "WC-064", "WC-065", "WC-070", "WC-072", ...(((window.HS_CONFIG || {}).instant) || [])]);
-  const INSTANT_ENGINE = "NightsBridge";
 
   // ---------- one model for every bookable stay ----------
   const REG = { ...REGIONS, boland: "Boland", gkaroo: "Great Karoo", kogelberg: "Kogelberg", langeberg: "Langeberg", winterhoek: "Winterhoek" };
@@ -52,7 +48,6 @@
     "West Coast": "west", "Winterhoek": "winterhoek" };
   // Municipal operators only appear in the accommodation data. Hidden from Object.entries(OPS) so the map's filter chips don't double up.
   if (!Object.prototype.hasOwnProperty.call(OPS, "mu")) Object.defineProperty(OPS, "mu", { value: { label: "Municipal", c: "#6b7f7a", channel: "email" }, enumerable: false });
-  const OP_KEYS = ["cn", "sp", "pv", "cm", "mu"];
 
   // Nightly price per person until real rates come from the backend. Shown as "est." everywhere.
   const PRICE_EST = [[/luxury/i, 4500], [/lodge|resort|game reserve/i, 950], [/glamping|treehouse|tent|pod|eco-cabin/i, 650], [/backpack|dormitory/i, 280],
@@ -76,21 +71,21 @@
   const EXTRA = [];         // accommodation rows shaped like PLACES, so app-core's place() (My trips, back office) finds them
   let ready = false;
 
-  const modeOf = id => INSTANT.has(id) ? "instant" : "enquiry";
+  const modeOf = (op, id) => bookMode(op, id);
   // Who we deal with, as written in sentences: the park authority, or the stay itself for private, community and municipal stays.
   const whoOf = (op, opLabel, name, isPackage) => op === "cn" || op === "sp" ? opLabel : isPackage ? "the operator" : name;
   const cap = t => t.charAt(0).toUpperCase() + t.slice(1);
   function fromPlace(p) {
     const fixed = p.nights > 1 && /trail|route|slackpack/i.test(p.kind) ? p.nights : 0;
-    return { id: p.id, src: "place", name: p.name, op: p.op, opLabel: OPS[p.op].label, color: OPS[p.op].c, kind: p.kind, regionKey: p.region, region: REGIONS[p.region],
-      lat: p.lat, lng: p.lng, price: p.price, est: false, beds: p.beds, fixed, mode: modeOf(p.id), who: whoOf(p.op, OPS[p.op].label, p.name, !!fixed), blurb: p.blurb, stops: p.huts, km: p.km, grade: p.grade,
+    return { id: p.id, src: "place", name: p.name, op: p.op, opLabel: OPS[p.op].label, color: BOOK_MODES[modeOf(p.op, p.id)].c, kind: p.kind, regionKey: p.region, region: REGIONS[p.region],
+      lat: p.lat, lng: p.lng, price: p.price, est: false, beds: p.beds, fixed, mode: modeOf(p.op, p.id), engine: bookEngine(p.op, p.id), who: whoOf(p.op, OPS[p.op].label, p.name, !!fixed), blurb: p.blurb, stops: p.huts, km: p.km, grade: p.grade,
       nights: p.nights, photo: PLACE_PHOTO[p.id] || null };
   }
   function fromStay(s) {
     const trail = s.type === "Trail hut" ? PLACES.filter(p => p.nights > 1).find(p => s.hike.toLowerCase().includes(p.name.toLowerCase().split(" ")[0])) : null;
     const regionKey = REG_OF[s.region] || "west";
-    return { id: s.id, src: "stay", name: s.name, op: s.k, opLabel: s.operator, color: (OPS[s.k] || OPS.pv).c, kind: s.type, regionKey, region: REG[regionKey],
-      lat: s.lat, lng: s.lng, price: priceOf(s), est: true, beds: bedsOf(s), fixed: 0, mode: modeOf(s.id), who: whoOf(s.k, s.operator, s.name, false), loc: s.loc, hike: s.hike, notes: s.notes, permit: /permit/i.test(s.book),
+    return { id: s.id, src: "stay", name: s.name, op: s.k, opLabel: s.operator, color: BOOK_MODES[modeOf(s.k, s.id)].c, kind: s.type, regionKey, region: REG[regionKey],
+      lat: s.lat, lng: s.lng, price: priceOf(s), est: true, beds: bedsOf(s), fixed: 0, mode: modeOf(s.k, s.id), engine: bookEngine(s.k, s.id), who: whoOf(s.k, s.operator, s.name, false), loc: s.loc, hike: s.hike, notes: s.notes, permit: /permit/i.test(s.book),
       trailOf: trail ? trail.id : null, photo: null };
   }
   PLACES.forEach(p => U.set(p.id, fromPlace(p)));
@@ -99,7 +94,7 @@
     const single = PLACES.filter(p => !(p.nights > 1 && /trail|route|slackpack/i.test(p.kind)));
     STAYS.forEach(s => {
       const twin = single.find(p => norm(s.name).includes(norm(p.name)));
-      if (twin && !INSTANT.has(s.id)) { DUP[s.id] = twin.id; return; }
+      if (twin && !NIGHTSBRIDGE.has(s.id)) { DUP[s.id] = twin.id; return; }
       const u = fromStay(s);
       U.set(u.id, u);
       EXTRA.push({ id: u.id, name: u.name, op: u.op, lat: u.lat, lng: u.lng, region: u.regionKey, kind: u.kind, nights: 1, km: 0, grade: "—", beds: u.beds, price: u.price, huts: [u.name], blurb: u.hike });
@@ -111,8 +106,17 @@
   const getU = id => U.get(id) || (DUP[id] ? U.get(DUP[id]) : null);
   const allU = () => [...U.values()];
   const instant = u => u.mode === "instant";
-  const tagOp = u => `<span class="op" style="--c:${u.color}"><i></i>${esc(u.opLabel)}</span>`;
-  const modeTag = u => `<span class="tag ${instant(u) ? "ok" : "info"}">${instant(u) ? "Instant booking" : "On enquiry"}</span>`;
+  // The coloured dot is the booking type; the operator follows as plain text.
+  const tagOp = u => `<span class="opname">${esc(u.opLabel)}</span>`;
+  // The calendar we book into, for an instant stay: "CapeNature's online booking system", "Mount Ceder's NightsBridge calendar".
+  const calText = u => u.op === "cn" || u.op === "sp" ? u.engine : `${u.who}'s ${u.engine} calendar`;
+  const modeTag = u => `<span class="tag ${instant(u) ? "ok" : "info"}">${BOOK_MODES[u.mode].label}</span>`;
+  const modeShort = u => BOOK_MODES[u.mode].short;
+  // How payment works for each type, in one sentence.
+  const payLine = u => instant(u)
+    ? (PAYMENTS ? `You pay when you book: the full amount, or a deposit if ${esc(u.who)} takes one.`
+      : `Book now and your beds are held. We confirm with ${esc(u.who)} and send a payment link for the amount due: the full amount, or a deposit if ${esc(u.who)} takes one.`)
+    : `Nothing is charged now. You pay only once ${esc(u.who)} confirms availability and the exact price.`;
   const leadDays = u => instant(u) ? 1 : 3;
   const horizonDays = u => u.op === "cn" ? 365 : 540;
 
@@ -270,7 +274,7 @@
 
   // ---------- calendar ----------
   // Instant booking: a month grid with live beds left per night.
-  // On enquiry: every night shows "Ask" (availability on enquiry) except nights we have already booked there, which show "Booked".
+  // Easy enquire: every night shows "Ask" (availability on enquiry) except nights we have already booked there, which show "Booked".
   // Range stays: tap check-in, then check-out. Trail packages: tap the start date.
   function makeCal(host, u, o) {
     const today = todayS(), minDate = addD(today, leadDays(u));
@@ -359,7 +363,7 @@
     function render() {
       const ms = []; for (let i = 0; i < months; i++) ms.push(addMonths(view, i));
       host.innerHTML = `<div class="hscal" style="--m:${months}">
-        ${live ? "" : `<div class="hsenq"><span><b>Availability on enquiry.</b> Pick your preferred dates and we'll check with ${esc(u.who)}. Greyed-out nights are already booked.</span></div>`}
+        ${live ? "" : `<div class="hsenq"><span><b>Easy enquire.</b> Pick your preferred dates and we'll email ${esc(u.who)} for you. Greyed-out nights are already booked.</span></div>`}
         <div class="hscal-top"><button type="button" data-a="prev" aria-label="Previous month" ${view <= monthStart(minDate) ? "disabled" : ""}>‹</button>
           <span class="hscal-hint" aria-live="polite">${hint()}</span>
           <button type="button" data-a="next" aria-label="Next month" ${addMonths(view, months) > maxDate ? "disabled" : ""}>›</button></div>
@@ -421,12 +425,12 @@
       <div class="row2 tot"><span>${instant(u) ? "Total" : "Guide total"}</span><span>${R(q.total)}</span></div>
       ${instant(u)
         ? (u.est ? `<div class="sub">Stay fees are an estimate until ${esc(u.who)}'s live rates load.</div>` : "")
-        : `<div class="sub">A guide price only. ${esc(cap(u.who))} confirms the exact price with availability, and you only pay once you accept.</div>`}
+        : `<div class="sub">A guide price only. ${esc(cap(u.who))} confirms the exact price with availability, and you pay only once it's confirmed.</div>`}
     </div>`;
   }
   const howText = u => instant(u)
-    ? `${esc(cap(u.who))}'s calendar is live, through ${INSTANT_ENGINE}. ${PAYMENTS ? "Book and pay here, and your booking is confirmed straight away." : "Book here and your beds are held straight away. We confirm with the stay and send a payment link."}`
-    : `We check your dates with ${esc(u.who)} and reply within about 48 hours with availability and the exact price. Nothing is charged until you accept.`;
+    ? `We book straight into ${esc(calText(u))}. ${payLine(u)}`
+    : `We email ${esc(u.who)} for you and reply within about 48 hours with availability and the exact price. ${payLine(u)}`;
   const notReady = () => { view.innerHTML = `<div class="wrap phead"><p class="muted">Loading stays…</p></div>`; };
   const notFound = () => { view.innerHTML = `<div class="wrap phead"><div class="eyebrow">Stays</div><h1>We couldn't find that stay</h1><p class="lead"><a href="#stays">See every stay</a> or <a href="#map">find one on the map</a>.</p></div>`; };
 
@@ -439,14 +443,14 @@
     let n = Math.min(u.beds, draft && draft.place === u.id ? draft.n : 2);
     const trail = u.trailOf ? getU(u.trailOf) : null;
     const facts = u.src === "place"
-      ? [["Nights", u.nights], ["Distance", u.km ? u.km + " km" : "—"], ["Grade", u.grade], ["Booking", instant(u) ? "Instant" : "On enquiry"]]
-      : [["Type", esc(u.kind.split("/")[0].trim())], ["Sleeps", "about " + u.beds], ["Booking", instant(u) ? "Instant" : "On enquiry"], ["From", R(u.price) + `<span class="hsest">est.</span>`]];
+      ? [["Nights", u.nights], ["Distance", u.km ? u.km + " km" : "—"], ["Grade", u.grade], ["Booking", modeShort(u)]]
+      : [["Type", esc(u.kind.split("/")[0].trim())], ["Sleeps", "about " + u.beds], ["Booking", modeShort(u)], ["From", R(u.price) + `<span class="hsest">est.</span>`]];
     view.innerHTML = `
     <div class="wrap detail">
       <div>
         <div class="crumbs"><a href="#stays">Stays</a> / <a href="#stays-${u.regionKey}">${esc(u.region)}</a></div>
         ${u.photo ? `<div class="stayphoto">${media(u.photo, 0, 1, u.name)}</div>` : ""}
-        <span style="font-size:.9rem;display:inline-flex;gap:10px;align-items:center;flex-wrap:wrap">${tagOp(u)}${modeTag(u)}</span>
+        <span style="font-size:.9rem;display:inline-flex;gap:10px;align-items:center;flex-wrap:wrap">${modeTag(u)}${tagOp(u)}</span>
         <h1 style="font-size:clamp(2rem,4.5vw,3rem);line-height:1.08;margin-top:6px">${esc(u.name)}</h1>
         <p class="muted" style="margin:6px 0 0">${esc(u.kind)} · ${esc(u.region)}${u.loc ? " · " + esc(u.loc) : ""}</p>
         <div class="factrow">${facts.map(([k, v]) => `<div><small>${k}</small><b>${v}</b></div>`).join("")}</div>
@@ -460,8 +464,8 @@
           <h2>How booking works</h2>
           ${instant(u)
             ? `<p>${howText(u)} The calendar shows the beds left each night, so what you see is what you can book. One booking reference covers everything.</p>`
-            : `<p>Pick your preferred dates on the calendar and send us an enquiry. There's no need to contact ${esc(u.who)} yourself. Nights we've already booked are greyed out; everything else depends on ${esc(u.who)}'s own bookings, so we confirm it with them.</p>
-               <p>We reply within about 48 hours with availability and the exact price. If it suits you, accept and pay, and we finalise the booking. Nothing is charged before then.</p>`}
+            : `<p>This is an Easy enquire stay. Pick your preferred dates on the calendar and send us an enquiry; there's no need to contact ${esc(u.who)} yourself. We email them on your behalf. Nights we've already booked are greyed out; everything else depends on ${esc(u.who)}'s own bookings, so we confirm it with them.</p>
+               <p>We reply within about 48 hours with availability and the exact price. You pay only once availability is confirmed, and then we finalise the booking. Nothing is charged before then.</p>`}
           <h2>What to bring</h2>
           <p>Bring your own sleeping bag, food and stove unless the listing says otherwise. Many stays have no electricity. Trails can close at short notice for fire or extreme weather; we'll tell you straight away if your dates are affected.</p>
         </div>
@@ -474,7 +478,7 @@
         <div id="h-sum"></div>
         <button class="btn primary block" id="h-book" disabled>${instant(u) ? (u.fixed ? "Book this start date" : "Book these dates") : "Enquire about these dates"}</button>
         <label class="field" style="flex-direction:row;align-items:center;gap:10px;color:var(--fg);font-size:.92rem"><input type="checkbox" id="h-alert" ${alerts[u.id] ? "checked" : ""} style="width:auto;accent-color:var(--green)"> Alert me about cancellations</label>
-        <div class="how"><span><b>${instant(u) ? "Instant booking:" : "On enquiry:"}</b> ${howText(u)}</span><span>Trailscape adds a flat ${R(FEE)} per hiker.</span></div>
+        <div class="how"><span><b>${BOOK_MODES[u.mode].label}:</b> ${howText(u)}</span><span>Trailscape adds a flat ${R(FEE)} per hiker.</span></div>
       </aside>
     </div>`;
     const m = baseMap("hmap", { center: [u.lng, u.lat], zoom: 10, styleCtl: false, cooperativeGestures: true });
@@ -508,13 +512,13 @@
     }
     function aside(extra = "") {
       return `<aside><div class="card panel" style="gap:14px">
-        <div><span style="font-size:.85rem;display:inline-flex;gap:8px;align-items:center;flex-wrap:wrap">${tagOp(u)}${modeTag(u)}</span><div style="font-weight:600;margin-top:4px">${esc(u.name)}</div><div class="muted" style="font-size:.85rem">${esc(u.kind)} · ${esc(u.region)}</div></div>
+        <div><span style="font-size:.85rem;display:inline-flex;gap:8px;align-items:center;flex-wrap:wrap">${modeTag(u)}${tagOp(u)}</span><div style="font-weight:600;margin-top:4px">${esc(u.name)}</div><div class="muted" style="font-size:.85rem">${esc(u.kind)} · ${esc(u.region)}</div></div>
         <div id="b-sum"></div>${extra}</div></aside>`;
     }
     function s1() {
       stage = 1;
       const note = live
-        ? `${u.fixed ? `The ${esc(u.name)} is booked as a ${u.fixed}-night trip. Pick the day you start walking.` : `Stays of 1 to ${MAX_NIGHTS} nights. Numbers show beds left each night.`} Availability comes live from ${esc(u.who)}'s ${INSTANT_ENGINE} calendar.`
+        ? `${u.fixed ? `The ${esc(u.name)} is booked as a ${u.fixed}-night trip. Pick the day you start walking.` : `Stays of 1 to ${MAX_NIGHTS} nights. Numbers show beds left each night.`} Availability comes from ${esc(calText(u))}.`
         : `${u.fixed ? `The ${esc(u.name)} is booked as a ${u.fixed}-night trip. Pick the day you'd like to start walking.` : `Stays of 1 to ${MAX_NIGHTS} nights.`} Dates start ${leadDays(u)} days from today so ${esc(u.who)} has time to reply.`;
       shell(`<div class="hsflow">
         <div class="card panel">
@@ -549,8 +553,8 @@
             <div><div class="field" style="margin-bottom:6px">Pay with</div>
               <div class="gw"><label><input type="radio" name="gw" value="card" checked> Card</label><label><input type="radio" name="gw" value="eft"> Instant EFT</label></div></div>
             <label class="field hscheck"><input type="checkbox" required> I agree that Trailscape books on my behalf and may share my name and contact details with ${esc(u.who)} for this booking. ${esc(cap(u.who))}'s own cancellation rules apply to the stay fees; our fee isn't refundable once the booking is confirmed.</label>
-            <div class="note">${PAYMENTS ? "These dates are held for you while you pay. Your booking is confirmed as soon as payment goes through."
-              : `These beds are held for you as soon as you book. Nothing is charged now: we book with ${esc(u.who)}, then email your confirmation and a secure payment link for ${R(q.total)}.`}</div>
+            <div class="note">${PAYMENTS ? `These dates are held for you while you pay: the full amount, or a deposit if ${esc(u.who)} takes one. Your booking is confirmed as soon as payment goes through.`
+              : `These beds are held for you as soon as you book. Nothing is charged now: we book with ${esc(u.who)}, then email your confirmation and a secure payment link for the amount due: ${R(q.total)}, or a deposit if ${esc(u.who)} takes one.`}</div>
             <div style="display:flex;gap:10px;flex-wrap:wrap"><button class="btn line" type="button" id="b-back">← Change dates</button><button class="btn primary" type="submit" id="b-go">${PAYMENTS ? `Pay ${R(q.total)} and book` : "Book these dates"}</button></div>
             ${isSample("createBooking") ? `<span class="muted" style="font-size:.8rem">Prototype: no payment is taken and nothing is sent to the operator.</span>` : ""}
           </form>
@@ -563,7 +567,7 @@
             <label class="field hscheck"><input type="checkbox" id="c-flex" ${draft.flex ? "checked" : ""}> My dates are flexible by a few days if these nights aren't free</label>
             <label class="field">Anything we should ask ${esc(u.who)}? (optional)<textarea id="c-notes" rows="3" placeholder="e.g. we'd prefer the cottage closest to the river, one vegetarian, arriving late">${esc(draft.notes || "")}</textarea></label>
             <label class="field hscheck"><input type="checkbox" required> I agree that Trailscape may share my name and contact details with ${esc(u.who)} to check availability for this enquiry.</label>
-            <div class="note">No payment now. We'll check with ${esc(u.who)} and email you within about 48 hours with availability and the exact price. If it suits you, you accept and pay then.</div>
+            <div class="note">No payment now. We'll email ${esc(u.who)} for you and reply within about 48 hours with availability and the exact price. You pay only once availability is confirmed.</div>
             <div style="display:flex;gap:10px;flex-wrap:wrap"><button class="btn line" type="button" id="b-back">← Change dates</button><button class="btn primary" type="submit" id="b-go">Send enquiry</button></div>
             ${isSample("createEnquiry") ? `<span class="muted" style="font-size:.8rem">Prototype: nothing is sent to the operator.</span>` : ""}
           </form>
@@ -578,7 +582,7 @@
         const base = { stayId: u.id, stayName: u.name, operator: u.opLabel, checkIn: q.in, checkOut: q.out, nights: q.nights, hikers: draft.n,
           guest: guest(), notes: $("#c-notes").value.trim() };
         const payload = live
-          ? { ...base, engine: INSTANT_ENGINE, payMethod: (document.querySelector('input[name="gw"]:checked') || {}).value || "card",
+          ? { ...base, engine: u.engine, payMethod: (document.querySelector('input[name="gw"]:checked') || {}).value || "card",
               quote: { stayFees: q.stay, serviceFee: q.fee, total: q.total, estimated: u.est, currency: "ZAR" } }
           : { ...base, flexibleDates: $("#c-flex").checked, guidePrice: { stayFees: q.stay, serviceFee: q.fee, total: q.total, currency: "ZAR" } };
         try {
@@ -597,10 +601,10 @@
     function s3(ref) {
       stage = 3;
       const evs = live && !PAYMENTS
-        ? [["Booking received", "Your beds are held. Nothing charged yet"], [`Booking with ${u.who}`, `We reserve your dates in their ${INSTANT_ENGINE} calendar`], ["Confirmed", "We email your confirmation and a payment link"]]
+        ? [["Booking received", "Your beds are held. Nothing charged yet"], [`Booking with ${u.who}`, `We reserve your dates in ${calText(u)}`], ["Confirmed", "We email your confirmation and a payment link for the amount due"]]
         : live
-        ? [["Booking received", "Payment taken"], [`Booked in ${u.who}'s calendar`, `Your dates are reserved through ${INSTANT_ENGINE}`], ["Confirmed", "Your booking details are sent to your email"]]
-        : [["Enquiry received", "No payment taken"], [`Checking with ${u.who}`, "We ask about availability and the exact price"], [`${cap(u.who)} replies`, "Usually within 48 hours"], ["You accept and pay", "We send you the price and a payment link"], ["Confirmed", "Your booking details are sent to your email"]];
+        ? [["Booking received", "Payment taken"], [`Booked in ${u.who}'s calendar`, `Your dates are reserved in ${calText(u)}`], ["Confirmed", "Your booking details are sent to your email"]]
+        : [["Enquiry received", "No payment taken"], [`Checking with ${u.who}`, "We ask about availability and the exact price"], [`${cap(u.who)} replies`, "Usually within 48 hours"], ["Availability confirmed, you pay", "We send the exact price and a payment link"], ["Confirmed", "Your booking details are sent to your email"]];
       shell(`<div class="card panel">
         <div style="display:flex;justify-content:space-between;gap:12px;flex-wrap:wrap;align-items:baseline"><div><span class="muted" style="font-size:.85rem">${live ? "Booking" : "Enquiry"} reference</span><div class="mono" style="font-size:1.2rem">${esc(ref)}</div></div><span class="tag info" id="stat-tag">In progress</span></div>
         <div class="muted" style="font-size:.92rem">${fmtLong(q.in)} → ${fmtLong(q.out)} · ${q.nights} ${q.nights === 1 ? "night" : "nights"} · ${live ? R(q.total) : "guide price " + R(q.total)}</div>
@@ -683,30 +687,28 @@
   };
   if (ACCT()) ACCT().onChange(() => { if (route() === "trips" && !document.querySelector(".acct")) nav(); });
 
-  // ---------- stays list: every stay, instant or on enquiry ----------
+  // ---------- stays list: every stay, Instant booking or Easy enquire ----------
   huts = function (regionArg) {
-    const f = { op: null, region: REG[regionArg] ? regionArg : null, q: "", show: 40, sort: "name", instantOnly: false };
+    const f = { mode: null, region: REG[regionArg] ? regionArg : null, q: "", show: 40, sort: "name" };
     const regions = [...new Set(allU().map(u => u.regionKey))].sort((a, b) => REG[a].localeCompare(REG[b]));
     view.innerHTML = `
     <div class="wrap phead"><div class="eyebrow">Stays &amp; cabins</div><h1>Every overnight stay, one list.</h1>
-      <p class="lead">CapeNature, SANParks, community, municipal and private stays. Book instantly where the calendar is live, or send an enquiry and we check with the operator for you.</p>
+      <p class="lead">Every stay is either <b>Instant booking</b>, where we book straight into the CapeNature, SANParks or NightsBridge calendar and you pay when you book, or <b>Easy enquire</b>, where we email the stay for you and you pay once availability is confirmed.</p>
       <div class="filters" id="f-ops"></div>
       <div class="filters"><select id="f-region" class="chip" aria-label="Region"><option value="">All regions</option>${regions.map(k => `<option value="${k}" ${k === f.region ? "selected" : ""}>${esc(REG[k])}</option>`).join("")}</select>
       <select id="f-sort" class="chip" aria-label="Sort"><option value="name">A to Z</option><option value="price">Lowest price</option><option value="beds">Most beds</option></select>
-      <button class="chip" type="button" id="f-instant" aria-pressed="false">Instant booking only</button>
       <input id="f-q" class="chip" type="search" placeholder="Search stays, places, trails" aria-label="Search stays" style="min-width:0;flex:1 1 180px"></div>
       <p class="hscount" id="hcount"></p>
     </div>
     <div class="wrap"><div class="list" id="hl"></div><div class="hsmore" id="hmore"></div></div>`;
     const fo = $("#f-ops");
-    fo.innerHTML = `<button class="chip" aria-pressed="true" data-op="">All</button>` + OP_KEYS.map(k => `<button class="chip" aria-pressed="false" data-op="${k}" style="--c:${OPS[k].c}"><i></i>${OPS[k].label}</button>`).join("");
-    fo.querySelectorAll(".chip").forEach(b => b.onclick = () => { f.op = b.dataset.op || null; f.show = 40; fo.querySelectorAll(".chip").forEach(x => x.setAttribute("aria-pressed", x === b)); draw(); });
+    fo.innerHTML = `<button class="chip" aria-pressed="true" data-mode="">All</button>` + Object.entries(BOOK_MODES).map(([k, b]) => `<button class="chip" aria-pressed="false" data-mode="${k}" style="--c:${b.c}"><i></i>${b.label}</button>`).join("");
+    fo.querySelectorAll(".chip").forEach(b => b.onclick = () => { f.mode = b.dataset.mode || null; f.show = 40; fo.querySelectorAll(".chip").forEach(x => x.setAttribute("aria-pressed", x === b)); draw(); });
     $("#f-region").onchange = e => { f.region = e.target.value || null; f.show = 40; draw(); };
     $("#f-sort").onchange = e => { f.sort = e.target.value; draw(); };
-    $("#f-instant").onclick = e => { f.instantOnly = !f.instantOnly; e.currentTarget.setAttribute("aria-pressed", f.instantOnly); f.show = 40; draw(); };
     $("#f-q").oninput = e => { f.q = e.target.value.trim().toLowerCase(); f.show = 40; draw(); };
     function draw() {
-      const l = allU().filter(u => (!f.op || u.op === f.op) && (!f.region || u.regionKey === f.region) && (!f.instantOnly || instant(u))
+      const l = allU().filter(u => (!f.mode || u.mode === f.mode) && (!f.region || u.regionKey === f.region)
         && (!f.q || [u.name, u.kind, u.region, u.loc, u.hike, u.opLabel, (u.stops || []).join(" ")].join(" ").toLowerCase().includes(f.q)));
       l.sort(f.sort === "price" ? (a, b) => a.price - b.price : f.sort === "beds" ? (a, b) => b.beds - a.beds : (a, b) => (instant(b) - instant(a)) || a.name.localeCompare(b.name));
       $("#hcount").textContent = `${l.length} ${l.length === 1 ? "stay" : "stays"}${ready ? "" : " (loading more…)"}`;
@@ -730,8 +732,8 @@
     const box = document.createElement("div");
     box.className = "hsbook";
     box.innerHTML = `<div class="p"><span>from <b>${R(u.price)}</b> pp per night${u.est ? `<span class="hsest">est.</span>` : ""}</span>${modeTag(u)}</div>
-      <div class="btns"><a class="btn primary sm" href="#book-${u.id}">${instant(u) ? "Check dates" : "Enquire"}</a><a class="btn line sm" href="#stay-${u.id}">View stay</a></div>
-      <small>${instant(u) ? (PAYMENTS ? "Live calendar. Book and pay on Trailscape." : "Live calendar. Book on Trailscape, pay when confirmed.") : "Availability on enquiry. We check with the operator for you."}</small>`;
+      <div class="btns"><a class="btn primary sm" href="#book-${u.id}">${instant(u) ? "Check dates" : "Easy enquire"}</a><a class="btn line sm" href="#stay-${u.id}">View stay</a></div>
+      <small>${instant(u) ? "Live calendar. Pay when you book (full amount or deposit)." : "We email the stay for you. Pay once availability is confirmed."}</small>`;
     const dl = card.querySelector("dl");
     if (dl) dl.after(box); else card.appendChild(box);
   }

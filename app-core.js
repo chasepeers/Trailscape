@@ -12,6 +12,21 @@ const OPS = {
   cm: { label: "Community", c: "#7a4f8f", channel: "email" },
 };
 
+// ---------- two ways to book ----------
+// Instant booking: we book straight into the provider's own calendar. CapeNature (online portal), SANParks (central
+//   reservations) and stays whose booking engine is NightsBridge. The guest pays when booking: in full, or a deposit
+//   where the stay's terms allow one.
+// Easy enquire: everything else. We email the stay on the guest's behalf; the guest pays once availability is confirmed.
+// Internally the second mode is called "enquiry" (it matches the database).
+const NIGHTSBRIDGE = new Set(["WC-056", "WC-064", "WC-065", "WC-070", "WC-072", ...(((window.HS_CONFIG || {}).instant) || [])]);
+const BOOK_MODES = {
+  instant: { label: "Instant booking", short: "Instant", c: "#0b9a43" },
+  enquiry: { label: "Easy enquire", short: "Easy enquire", c: "#2f7de1" },
+};
+const bookMode = (op, id) => op === "cn" || op === "sp" || NIGHTSBRIDGE.has(id) ? "instant" : "enquiry";
+// The calendar we book into for an instant stay, as written in sentences.
+const bookEngine = (op, id) => op === "cn" ? "CapeNature's online booking system" : op === "sp" ? "SANParks central reservations" : NIGHTSBRIDGE.has(id) ? "NightsBridge" : null;
+
 // ---------- sample data (approximate; verify before launch) ----------
 const PLACES = [
   { id: "whale", name: "Whale Trail", op: "cn", lat: -34.42, lng: 20.62, region: "overberg", kind: "Multi-day trail", nights: 4, km: 55, grade: "Moderate", beds: 12, price: 590,
@@ -116,7 +131,9 @@ let myTrips = store.get("trips", []);
 // ---------- helpers ----------
 const place = id => PLACES.find(p => p.id === id);
 function toast(t) { const d = document.createElement("div"); d.className = "toast"; d.textContent = t; document.body.appendChild(d); setTimeout(() => d.remove(), 2600); }
-function opTag(p) { return `<span class="op" style="--c:${OPS[p.op].c}"><i></i>${OPS[p.op].label}</span>`; }
+// The coloured dot is the booking type; the operator's name follows as plain text.
+function modeChip(mode) { const b = BOOK_MODES[mode]; return `<span class="op" style="--c:${b.c}"><i></i>${b.label}</span>`; }
+function opTag(p) { return `${modeChip(bookMode(p.op, p.id))}<span class="opname">${esc(OPS[p.op].label)}</span>`; }
 function chanIcon(c) {
   return c === "portal"
     ? `<span class="chan"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5"><rect x="1.5" y="2.5" width="13" height="10" rx="1.5"/><path d="M1.5 5.5h13"/></svg>Online portal</span>`
@@ -173,7 +190,7 @@ function baseMap(el, opts = {}, onStyle = () => {}) {
   maps.push(m); return m;
 }
 function hutsFC(list) {
-  return { type: "FeatureCollection", features: list.map(p => ({ type: "Feature", properties: { id: p.id, name: p.name, color: OPS[p.op].c }, geometry: { type: "Point", coordinates: [p.lng, p.lat] } })) };
+  return { type: "FeatureCollection", features: list.map(p => ({ type: "Feature", properties: { id: p.id, name: p.name, color: BOOK_MODES[bookMode(p.op, p.id)].c }, geometry: { type: "Point", coordinates: [p.lng, p.lat] } })) };
 }
 function addHuts(m, list, onPick) {
   m.addSource("huts", { type: "geojson", data: hutsFC(list), cluster: true, clusterRadius: 44, clusterMaxZoom: 8 });
@@ -334,7 +351,7 @@ function home() {
         <div class="herorows">
           <a class="herorow" href="#map"><b>Map</b><span class="pills"><span class="pill live">Every stay</span><span class="pill">Western Cape</span></span></a>
           <a class="herorow" href="#trails"><b>Trails</b><span class="pills"><span class="pill live">Bookable</span><span class="pill">Multi-day</span></span></a>
-          <a class="herorow" href="#stays"><b>Stays</b><span class="pills"><span class="pill live">${PLACES.length} listed</span><span class="pill">4 operators</span></span></a>
+          <a class="herorow" href="#stays"><b>Stays</b><span class="pills"><span class="pill live">${PLACES.length} listed</span><span class="pill">Instant or Easy enquire</span></span></a>
         </div>
       </div>
     </div>
@@ -348,8 +365,8 @@ function home() {
     </div>
     <div class="steps">
       <div class="step"><span class="n">01</span><b>Pick a trail or stay</b><span>Search the map or start from a classic route like the Whale Trail.</span></div>
-      <div class="step"><span class="n">02</span><b>We check your dates</b><span>Online portals are checked instantly. Email-only stays are contacted for you.</span></div>
-      <div class="step"><span class="n">03</span><b>Pay once, get confirmed</b><span>Your card is only charged once the beds are secured. One booking reference for everything.</span></div>
+      <div class="step"><span class="n">02</span><b>Book instantly or enquire</b><span>Instant booking stays show a live calendar. For Easy enquire stays, we email the stay for you.</span></div>
+      <div class="step"><span class="n">03</span><b>Pay and get confirmed</b><span>Instant bookings are paid when you book. Easy enquire stays are paid once availability is confirmed.</span></div>
     </div>
   </div></section>
 
@@ -391,15 +408,15 @@ function home() {
     <div class="eyebrow">How booking works</div>
     <h2 class="h2">Clear pricing. You see the operator's price and our fee.</h2>
     <div class="howpay">
-      <div><span class="k">STEP 1</span><b>Request</b><span>Choose dates and group size. Your card is held, not charged.</span></div>
-      <div><span class="k">STEP 2</span><b>We secure it</b><span>Our booking team checks the portal or emails the owner for you.</span></div>
-      <div><span class="k">STEP 3</span><b>You pay</b><span>The operator's price plus a flat ${R(FEE)} per hiker. Nothing hidden.</span></div>
-      <div><span class="k">STEP 4</span><b>Confirmed</b><span>We pay the operator straight away and send your confirmation.</span></div>
+      <div><span class="k">STEP 1</span><b>Choose</b><span>Pick your dates and group size. Every stay is either Instant booking or Easy enquire.</span></div>
+      <div><span class="k">INSTANT BOOKING</span><b>Pay when you book</b><span>We book straight into the CapeNature, SANParks or NightsBridge calendar. You pay in full, or a deposit where the stay takes one.</span></div>
+      <div><span class="k">EASY ENQUIRE</span><b>Pay once it's confirmed</b><span>We email the stay for you and reply within about 48 hours. You pay only once availability is confirmed.</span></div>
+      <div><span class="k">EITHER WAY</span><b>One clear price</b><span>The stay's price plus a flat ${R(FEE)} per hiker, and one booking reference.</span></div>
     </div>
     <div class="stats">
       <div class="stat"><b class="num">${PLACES.length}</b><span>stays and trails mapped (sample)</span></div>
-      <div class="stat"><b class="num">4</b><span>operator types covered</span></div>
-      <div class="stat"><b class="num">48 h</b><span>target confirmation for email-only stays</span></div>
+      <div class="stat"><b class="num">2</b><span>ways to book: Instant booking or Easy enquire</span></div>
+      <div class="stat"><b class="num">48 h</b><span>target reply for Easy enquire stays</span></div>
       <div class="stat"><b class="num">${R(FEE)}</b><span>flat fee per hiker</span></div>
     </div>
   </div></section>
@@ -430,7 +447,7 @@ function home() {
 }
 
 function mapPage() {
-  const f = { ops: new Set(Object.keys(OPS)), q: "", sel: null };
+  const f = { modes: new Set(Object.keys(BOOK_MODES)), q: "", sel: null };
   view.innerHTML = `
   <div class="planner">
     <aside class="rail">
@@ -444,7 +461,7 @@ function mapPage() {
     </aside>
     <div class="mapwrap"><div id="pmap" role="region" aria-label="Map of overnight stays"></div></div>
   </div>`;
-  const filtered = () => PLACES.filter(p => f.ops.has(p.op) && (!f.q || (p.name + " " + p.huts.join(" ") + " " + REGIONS[p.region] + " " + p.kind).toLowerCase().includes(f.q)));
+  const filtered = () => PLACES.filter(p => f.modes.has(bookMode(p.op, p.id)) && (!f.q || (p.name + " " + p.huts.join(" ") + " " + REGIONS[p.region] + " " + p.kind).toLowerCase().includes(f.q)));
   const m = baseMap("pmap", { bounds: [[17.7, -35.0], [24.2, -31.6]], fitBoundsOptions: { padding: 30 } }, mm => addHuts(mm, filtered(), pick));
   function pick(id) { f.sel = id; const p = place(id); m.flyTo({ center: [p.lng, p.lat], zoom: Math.max(m.getZoom(), 10.5), duration: 900 }); list(); }
   function list() {
@@ -467,8 +484,8 @@ function mapPage() {
   }
   const refresh = () => { const src = m.getSource("huts"); if (src) src.setData(hutsFC(filtered())); list(); };
   const fo = $("#mops");
-  fo.innerHTML = Object.entries(OPS).map(([k, o]) => `<button class="chip mchip" aria-pressed="true" data-op="${k}" style="--c:${o.c}"><i></i>${o.label}</button>`).join("");
-  fo.querySelectorAll(".chip").forEach(btn => btn.onclick = () => { const k = btn.dataset.op; f.ops.has(k) ? f.ops.delete(k) : f.ops.add(k); btn.setAttribute("aria-pressed", f.ops.has(k)); refresh(); });
+  fo.innerHTML = Object.entries(BOOK_MODES).map(([k, o]) => `<button class="chip mchip" aria-pressed="true" data-mode="${k}" style="--c:${o.c}"><i></i>${o.label}</button>`).join("");
+  fo.querySelectorAll(".chip").forEach(btn => btn.onclick = () => { const k = btn.dataset.mode; f.modes.has(k) ? f.modes.delete(k) : f.modes.add(k); btn.setAttribute("aria-pressed", f.modes.has(k)); refresh(); });
   $("#mq").oninput = e => { f.q = e.target.value.toLowerCase(); refresh(); };
   m.on("moveend", list);
   m.once("load", list);

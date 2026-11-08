@@ -38,6 +38,18 @@ site until November 2026.
 - `home.css`: front page hero styles
 - `admin.html`: back office for enquiries, bookings, blocked nights and stay prices
 
+## Booking types
+
+Every stay is one of two types, set by `bookMode()` in `app-core.js` (and mirrored in the database `stays.mode` column):
+
+- **Instant booking** (`instant`): CapeNature, SANParks and NightsBridge stays (`NIGHTSBRIDGE` in `app-core.js`), where we
+  book straight into the provider's own calendar. The guest pays when booking: in full, or a deposit where the stay takes one.
+- **Easy enquire** (`enquiry`): every other stay. We email the stay on the guest's behalf; the guest pays once availability
+  is confirmed.
+
+The map and stays-list filters, the dot colours and the booking flow all follow these two types. After changing the rule,
+run `node scripts/make-seed.mjs` and apply `seed/stays.sql` so the database agrees.
+
 ## Back end (bookings API)
 
 Cloudflare Pages Functions in `functions/api/`, with shared code in `lib/api.js` and a D1 database (`trailscape`,
@@ -45,9 +57,9 @@ bound as `DB` in `wrangler.toml`). The site calls it through `window.HS_CONFIG =
 
 | Endpoint | Used by |
 | --- | --- |
-| `GET /api/availability?stay=&from=&to=` | calendar for instant-booking stays |
-| `GET /api/booked?stay=&from=&to=` | calendar for enquiry stays (nights already taken) |
-| `POST /api/enquiries` | enquiry form |
+| `GET /api/availability?stay=&from=&to=` | calendar for Instant booking stays |
+| `GET /api/booked?stay=&from=&to=` | calendar for Easy enquire stays (nights already taken) |
+| `POST /api/enquiries` | Easy enquire form |
 | `POST /api/bookings` | instant booking (payment is a stub until a gateway is chosen) |
 | `GET /api/health` | quick check that the database is connected |
 | `/api/auth/*`, `/api/me/trips` | sign in / sign up and My trips |

@@ -1,4 +1,4 @@
-// POST /api/bookings   (instant-booking stays)
+// POST /api/bookings   (Instant booking stays: CapeNature, SANParks, NightsBridge. The guest pays when booking, in full or a deposit.)
 // Body (sent by booking.js): { stayId, stayName, operator, checkIn, checkOut, nights, hikers, guest: { name, phone, email }, notes,
 //   engine, payMethod: "card" | "eft", quote: { stayFees, serviceFee, total, estimated, currency } }
 // → { ref: "HS-1101", status: "received", total, payment: { status: "stub" } }
@@ -19,7 +19,7 @@ async function takePayment(/* env, { ref, amount, method, guest } */) {
 export async function onRequestPost({ request, env, waitUntil }) {
   const db = env.DB, body = await readJson(request);
   const stay = await getStay(db, String(body.stayId || ""));
-  if (stay.mode !== "instant") throw new HttpError(409, "This stay is booked on enquiry; use /api/enquiries");
+  if (stay.mode !== "instant") throw new HttpError(409, "This is an Easy enquire stay; use /api/enquiries");
   const t = cleanTrip(body, stay);
   if (t.checkIn < addDays(todaySA(), 1)) throw bad("Pick a check-in date from tomorrow onwards");
   const payMethod = body.payMethod === "eft" ? "eft" : "card";

@@ -10,7 +10,9 @@
   document.head.appendChild(s);
 
   function init() {
-  const STAY_OPS = { ...OPS, mu: { label: "Municipal", c: "#6b7f7a" } };
+  // Dots and filters follow the booking type (Instant booking or Easy enquire), not the operator.
+  const modeOf = s => bookMode(s.k, s.id);
+  const colorOf = s => BOOK_MODES[modeOf(s)].c;
   const STATUS_TAG = {
     "Confirmed in research": ["ok", "Contact checked"],
     "Central reservations (confirmed)": ["ok", "Central reservations"],
@@ -93,11 +95,10 @@
   };
 
   function staysFC(list) {
-    return { type: "FeatureCollection", features: list.map(s => ({ type: "Feature", properties: { id: s.id, name: s.name, color: STAY_OPS[s.k].c }, geometry: { type: "Point", coordinates: [s.lng, s.lat] } })) };
+    return { type: "FeatureCollection", features: list.map(s => ({ type: "Feature", properties: { id: s.id, name: s.name, color: colorOf(s) }, geometry: { type: "Point", coordinates: [s.lng, s.lat] } })) };
   }
 
   function cardHTML(s, others) {
-    const op = STAY_OPS[s.k];
     const tag = STATUS_TAG[s.status] || ["mute", s.status || "Unverified"];
     const dir = `https://www.google.com/maps/dir/?api=1&destination=${s.lat},${s.lng}`;
     const contact = [
@@ -108,7 +109,7 @@
     return `
       <button class="grab" type="button" aria-label="Close details"></button>
       <button class="x" type="button" aria-label="Close">×</button>
-      <span style="font-size:.85rem" class="op"><i style="--c:${op.c};background:${op.c}"></i>${esc(s.operator)}</span>
+      <span style="font-size:.85rem" class="op" title="${BOOK_MODES[modeOf(s)].label}"><i style="--c:${colorOf(s)};background:${colorOf(s)}"></i>${esc(s.operator)}</span>
       <h3>${esc(s.name)}</h3>
       <div class="sub">${esc(s.type)} · ${esc(s.region)}</div>
       <span><span class="tag ${tag[0]}">${esc(tag[1])}</span></span>
@@ -129,10 +130,7 @@
     if (!wrap || !rail || !ops) return;
     let sel = null;
 
-    // Municipal chip (only accommodation has municipal operators) and the accommodation toggle
-    ops.insertAdjacentHTML("beforeend", `<button class="chip mchip" aria-pressed="true" data-op="mu" style="--c:${STAY_OPS.mu.c}"><i></i>Municipal</button>`);
-    const muChip = ops.querySelector('[data-op="mu"]');
-    muChip.onclick = () => { muChip.setAttribute("aria-pressed", muChip.getAttribute("aria-pressed") !== "true"); refresh(); };
+    // The accommodation toggle (the Instant booking / Easy enquire chips come from mapPage)
     ops.insertAdjacentHTML("afterend", `<button class="chip" id="stoggle" aria-pressed="${showStays}" style="align-self:flex-start"><span class="stayring" style="--c:var(--green)"></span>Accommodation (${STAYS.length})</button>`);
     const tog = $("#stoggle");
     tog.onclick = () => { showStays = !showStays; store.set("stays-on", showStays); tog.setAttribute("aria-pressed", showStays); if (!showStays) close(); refresh(); };
@@ -141,11 +139,11 @@
     wrap.insertAdjacentHTML("beforeend", `<div class="staycard" id="scard" hidden role="dialog" aria-label="Accommodation details"></div>`);
     const card = $("#scard");
 
-    const activeOps = () => new Set([...ops.querySelectorAll(".chip[data-op]")].filter(b => b.getAttribute("aria-pressed") === "true").map(b => b.dataset.op));
+    const activeModes = () => new Set([...ops.querySelectorAll(".chip[data-mode]")].filter(b => b.getAttribute("aria-pressed") === "true").map(b => b.dataset.mode));
     const filtered = () => {
       if (!showStays) return [];
-      const a = activeOps(), t = (q ? q.value : "").trim().toLowerCase();
-      return STAYS.filter(s => a.has(s.k) && (!t || [s.name, s.type, s.loc, s.hike, s.region, s.operator].join(" ").toLowerCase().includes(t)));
+      const a = activeModes(), t = (q ? q.value : "").trim().toLowerCase();
+      return STAYS.filter(s => a.has(modeOf(s)) && (!t || [s.name, s.type, s.loc, s.hike, s.region, s.operator].join(" ").toLowerCase().includes(t)));
     };
 
     function addLayers(mm) {
@@ -222,7 +220,7 @@
       const MAX = 40;
       $("#scnt").textContent = showStays ? `${inView.length} of ${all.length}` : "Hidden";
       el.innerHTML = !showStays ? `<p class="muted" style="margin:0">Turn on Accommodation above to see places to stay.</p>`
-        : inView.length ? inView.slice(0, MAX).map(s => `<button type="button" class="card sitem ${s.id === sel ? "on" : ""}" data-id="${s.id}"><span class="stayring" style="--c:${STAY_OPS[s.k].c}"></span><span><b>${esc(s.name)}</b><span class="m">${esc(s.type)} · ${esc(s.loc)}</span></span></button>`).join("")
+        : inView.length ? inView.slice(0, MAX).map(s => `<button type="button" class="card sitem ${s.id === sel ? "on" : ""}" data-id="${s.id}"><span class="stayring" style="--c:${colorOf(s)}"></span><span><b>${esc(s.name)}</b><span class="m">${esc(s.type)} · ${esc(s.loc)}</span></span></button>`).join("")
           + (inView.length > MAX ? `<p class="muted smore" style="margin:0">${inView.length - MAX} more in view. Zoom in to narrow the list.</p>` : "")
         : `<p class="muted" style="margin:0">No accommodation here. Zoom out or clear a filter.</p>`;
       el.querySelectorAll(".sitem").forEach(x => x.onclick = () => open(x.dataset.id, true));
@@ -246,7 +244,7 @@
       m.on("mouseleave", "st-hit", () => { m.getCanvas().style.cursor = ""; pop.remove(); });
     }
 
-    ops.addEventListener("click", e => { if (e.target.closest(".chip") && e.target.closest(".chip") !== muChip) setTimeout(refresh, 0); });
+    ops.addEventListener("click", e => { if (e.target.closest(".chip")) setTimeout(refresh, 0); });
     if (q) q.addEventListener("input", refresh);
     m.on("moveend", list);
     m.once("load", list);

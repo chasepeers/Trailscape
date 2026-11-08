@@ -1,4 +1,4 @@
-// POST /api/enquiries   (stays booked on enquiry: no payment, we check with the operator and reply within ~48 h)
+// POST /api/enquiries   (Easy enquire stays: no payment now. We email the stay, reply within ~48 h, and the guest pays once availability is confirmed)
 // Body (sent by booking.js): { stayId, stayName, operator, checkIn, checkOut, nights, hikers, guest: { name, phone, email },
 //   notes, flexibleDates, guidePrice: { stayFees, serviceFee, total, currency } }
 // → { ref: "HS-1100", status: "enquiry" }
