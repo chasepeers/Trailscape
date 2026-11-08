@@ -14,7 +14,12 @@ migrations_dir = "migrations"
 [vars]
 NOTIFY_TO = "hello@trailscape.co.za"
 MAIL_FROM = "Trailscape <hello@trailscape.co.za>"
+# Easy enquire: availability requests to stays come from here, and their replies go to <ref>.<token>@REPLY_DOMAIN,
+# which Resend Receiving posts to /api/inbound/resend. Leave REPLY_DOMAIN empty to have stays reply to NOTIFY_TO instead.
+OPERATOR_FROM = "Trailscape Bookings <bookings@trailscape.co.za>"
+REPLY_DOMAIN = "reply.trailscape.co.za"
 
 # Secrets (set in the dashboard under Settings → Variables and Secrets, never in this file):
 #   ADMIN_TOKEN     back-office password
 #   RESEND_API_KEY  optional, turns on emails
+#   RESEND_WEBHOOK_SECRET  signing secret (whsec_...) of the Resend "email.received" webhook for stay replies
