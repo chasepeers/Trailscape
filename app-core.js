@@ -81,7 +81,7 @@ const PHOTOS = {
   paternoster: { id: "photo-1720206811929-594dc6483578", by: "Grant Durr", where: "Paternoster" },
   franschhoek: { id: "photo-1741338898082-f0d1484d24f8", by: "Hendrik Prinsloo", where: "Franschhoek Pass, Hottentots Holland mountains" },
   ceres: { id: "photo-1563656410378-e5c283afafbc", by: "Brent Ninaber", where: "Snow on the mountains around Ceres" },
-  farmstay: { id: "photo-1740021823523-d88913c9c3b7", by: "Doug Bagg", where: "A white farm building below the mountains near Franschhoek" },
+  hut: { id: "photo-1720001854372-7abbc46a7073", by: "Asher Pardey", where: "A basic hut in the fynbos below the mountains at Pringle Bay" },
 };
 const PLACE_PHOTO = { whale: "dehoop", otter: "storms", cogh: "capepoint", outeniqua: "george", swellendam: "swellendam", swartberg: "swartberg", sneeuberg: "cederberg", heritage: "cederberg", sanddrif: "cederberg", fivebay: "paternoster" };
 const REGION_PHOTO = { cederberg: "cederberg", garden: "george", overberg: "swellroad", karoo: "swartberg", hh: "franschhoek", peninsula: "tablemtn", breede: "ceres", west: "paternoster" };
@@ -394,7 +394,7 @@ function home() {
         </ul>
         <a class="btn primary" href="#stays-enquire">Find an Easy enquire stay</a>
       </div>
-      ${media("farmstay", 1, 21, "A white farm building below the mountains near Franschhoek")}
+      ${media("hut", 1, 21, "A basic hut in the fynbos below the mountains at Pringle Bay")}
     </div>
   </div></section>
 
