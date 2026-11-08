@@ -462,6 +462,38 @@ footer h4 { text-transform: none; letter-spacing: -0.02em; font-size: .875rem; f
   .h2, .phead h1 { font-size: 1.75rem; }
   .logo { padding: 8px 10px; }
 }
+
+/* ===== Phones (8 Nov 2026): tighter spacing, bigger tap targets, readable small text ===== */
+.field input[type="checkbox"], .field input[type="radio"] { width: 20px !important; height: 20px; min-width: 20px; padding: 0; flex: none; appearance: auto; -webkit-appearance: auto; accent-color: var(--green); }
+@media (max-width: 760px) {
+  section.band { padding-block: 56px; }
+  .phead { padding-block: 32px 20px; }
+  .phead .lead { font-size: 1rem; line-height: 1.5; }
+  .phead .filters { gap: 8px; }
+  .phead select.chip { flex: 1 1 140px; }
+  .lead { font-size: 1.02rem; }
+  .flow { padding-block: 20px 56px; }
+  .flow h1 { font-size: 1.6rem !important; line-height: 1.15; }
+  .crumbs { font-size: .85rem; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .crumbs a { padding: 6px 0; }
+  .stepper { grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 6px; margin: 16px 0 18px; }
+  .stepper div { font-size: .74rem; line-height: 1.25; }
+  .detail h1 { font-size: 1.9rem !important; }
+  .hscal .d small { font-size: .64rem; }
+  .row { padding-block: 16px; gap: 6px; }
+  .row h3 { font-size: 1.15rem; }
+  footer { padding-block: 36px 28px; }
+  footer a { padding: 9px 0; }
+  footer .cols { gap: 20px 16px; }
+  .sample-flag { font-size: .72rem; padding: 5px 10px; }
+  .sample-flag button { padding: 4px 4px 4px 8px; }
+  .feature { gap: 24px; }
+  .btn { min-height: 44px; }
+  .btn.sm { min-height: 40px; }
+}
+@media (max-width: 960px) and (pointer: coarse) {
+  .maplibregl-map .maplibregl-ctrl-group button { width: 40px; height: 40px; }
+}
 </style>
 
 </head><body>

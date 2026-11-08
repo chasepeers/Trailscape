@@ -404,28 +404,7 @@ function home() {
       <div class="rnav"><button type="button" class="rbtn" id="rprev" aria-label="Previous regions">←</button><button type="button" class="rbtn" id="rnext" aria-label="More regions">→</button></div></div>
     <div class="rcar" id="regions" tabindex="0" aria-label="Hiking regions"></div>
   </div></section>
-
-  <section class="band"><div class="wrap">
-    <div class="eyebrow">How booking works</div>
-    <h2 class="h2">Clear pricing. You see the operator's price and our fee.</h2>
-    <div class="howpay">
-      <div><span class="k">STEP 1</span><b>Choose</b><span>Pick your dates and group size. Every stay is either Instant booking or Easy enquire.</span></div>
-      <div><span class="k">INSTANT BOOKING</span><b>Pay when you book</b><span>We book straight into the CapeNature, SANParks or NightsBridge calendar. You pay in full, or a deposit where the stay takes one.</span></div>
-      <div><span class="k">EASY ENQUIRE</span><b>Pay once it's confirmed</b><span>We email the stay for you and reply within about 48 hours. You pay only once availability is confirmed.</span></div>
-      <div><span class="k">EITHER WAY</span><b>One clear price</b><span>The stay's price plus a flat ${R(FEE)} per hiker, and one booking reference.</span></div>
-    </div>
-    <div class="stats">
-      <div class="stat"><b class="num">${PLACES.length}</b><span>stays and trails mapped (sample)</span></div>
-      <div class="stat"><b class="num">2</b><span>ways to book: Instant booking or Easy enquire</span></div>
-      <div class="stat"><b class="num">48 h</b><span>target reply for Easy enquire stays</span></div>
-      <div class="stat"><b class="num">${R(FEE)}</b><span>flat fee per hiker</span></div>
-    </div>
-  </div></section>
-
-  <section class="band alt"><div class="wrap split">
-    <div><h2 class="h2">Planning next season?</h2><p class="lead">CapeNature opens bookings 12 months ahead. Leave your email and we'll remind you before your trail opens.</p></div>
-    <form class="signup" id="remind"><input id="remind-email" type="email" placeholder="you@example.com" aria-label="Email" required><button class="btn primary" type="submit">Remind me</button></form>
-  </div></section>`;
+`;
   const regEl = $("#regions");
   regEl.innerHTML = Object.keys(REGION_PHOTO).map(k => [k, REGIONS[k]]).map(([k, n], i) => {
     const c = PLACES.filter(p => p.region === k).length;
@@ -444,7 +423,6 @@ function home() {
   };
   requestAnimationFrame(paint);
   startHeroVideo();
-  $("#remind").onsubmit = e => { e.preventDefault(); toast("Saved. In the live version you'd get an email when bookings open."); e.target.reset(); };
 }
 
 function mapPage() {

@@ -75,6 +75,7 @@
   // Who we deal with, as written in sentences: the park authority, or the stay itself for private, community and municipal stays.
   const whoOf = (op, opLabel, name, isPackage) => op === "cn" || op === "sp" ? opLabel : isPackage ? "the operator" : name;
   const cap = t => t.charAt(0).toUpperCase() + t.slice(1);
+  const n2 = n => `${n} ${n === 1 ? "hiker" : "hikers"}`;
   function fromPlace(p) {
     const fixed = p.nights > 1 && /trail|route|slackpack/i.test(p.kind) ? p.nights : 0;
     return { id: p.id, src: "place", name: p.name, op: p.op, opLabel: OPS[p.op].label, color: BOOK_MODES[modeOf(p.op, p.id)].c, kind: p.kind, regionKey: p.region, region: REGIONS[p.region],
@@ -267,6 +268,24 @@
   @media (max-width: 900px) {
     .hsflow { grid-template-columns: 1fr; }
     .hsflow > aside { position: static; }
+    .hsflow.sumfirst > aside { order: -1; }
+  }
+  /* Phones: a fixed bar at the bottom with the price and the next step. */
+  .hsbar { display: none; }
+  @media (max-width: 900px) {
+    .hsbar { display: flex; position: fixed; z-index: 900; left: 0; right: 0; bottom: 0; align-items: center; justify-content: space-between; gap: 12px;
+      background: #fff; border-top: 1px solid var(--line); box-shadow: 0 -6px 20px rgba(13,19,33,.08);
+      padding: 10px max(16px, env(safe-area-inset-right, 0px)) calc(10px + env(safe-area-inset-bottom, 0px)) max(16px, env(safe-area-inset-left, 0px));
+      transition: transform .2s ease; }
+    .hsbar.off { transform: translateY(110%); }
+    .hsbar > div { display: grid; min-width: 0; line-height: 1.25; }
+    .hsbar b { font-weight: 600; font-size: 1.02rem; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+    .hsbar small { font-size: .8rem; color: var(--muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+    .hsbar .btn { flex: none; min-height: 46px; padding: 0 20px; display: inline-flex; align-items: center; }
+    body:has(.hsbar:not(.off)) .sample-flag { display: none; }
+    body:has(.hsbar) footer { padding-bottom: calc(96px + env(safe-area-inset-bottom, 0px)); }
+    body:has(#b-bar) .flow { padding-bottom: 96px; }
+    #b-next { display: none; }
   }
   @media (max-width: 960px) { .hsbook .btn { min-height: 46px; } .hscal .d { min-height: 48px; } }
   `;
@@ -480,7 +499,9 @@
         <label class="field" style="flex-direction:row;align-items:center;gap:10px;color:var(--fg);font-size:.92rem"><input type="checkbox" id="h-alert" ${alerts[u.id] ? "checked" : ""} style="width:auto;accent-color:var(--green)"> Alert me about cancellations</label>
         <div class="how"><span><b>${BOOK_MODES[u.mode].label}:</b> ${howText(u)}</span><span>Trailscape adds a flat ${R(FEE)} per hiker.</span></div>
       </aside>
-    </div>`;
+    </div>
+    <div class="hsbar" id="h-bar"><div><b>from ${R(u.price)}</b><small>pp per night${u.est ? " (est.)" : ""} · ${BOOK_MODES[u.mode].label}</small></div>
+      <a class="btn primary" id="h-bar-go" href="#book-${u.id}">${instant(u) ? "Check dates" : "Easy enquire"}</a></div>`;
     const m = baseMap("hmap", { center: [u.lng, u.lat], zoom: 10, styleCtl: false, cooperativeGestures: true });
     htmlMarker(m, u.lng, u.lat, "", "", u.name).getElement().style.setProperty("--c", u.color);
     const sum = $("#h-sum"), btn = $("#h-book");
@@ -488,6 +509,9 @@
       onChange: () => { const q = quoteOf(u, cal, n); sum.innerHTML = summaryHTML(u, q, n); btn.disabled = !q; } });
     bindStepper($("#h-n"), () => n, v => { n = v; cal.refresh(); }, u.beds);
     btn.onclick = () => { const s = cal.sel(); draft = { place: u.id, in: s.in, out: s.out, n, date: s.in }; location.hash = "book-" + u.id; };
+    // Phones: a bottom bar takes the guest to the booking flow; it hides while the booking box itself is on screen.
+    $("#h-bar-go").onclick = () => { const s = cal.sel(); draft = { place: u.id, in: s.in, out: s.out, n, date: s.in }; };
+    if ("IntersectionObserver" in window) { const bar = $("#h-bar"); new IntersectionObserver(es => es.forEach(e => bar.classList.toggle("off", e.isIntersecting)), { threshold: 0.15 }).observe($(".bookbox")); }
     $("#h-alert").onchange = e => { const a = store.get("alerts", {}); if (e.target.checked) a[u.id] = true; else delete a[u.id]; store.set("alerts", a); toast(e.target.checked ? "Alert on. We'll tell you when beds open up." : "Alert off."); };
   };
 
@@ -527,10 +551,15 @@
           <div class="hsnote">${note}</div>
         </div>
         ${aside(`<button class="btn primary block" id="b-next" disabled>Continue</button>`)}
-      </div>`);
+      </div>
+      <div class="hsbar" id="b-bar"><div><b id="b-bar-t">${u.fixed ? "Pick a start date" : "Pick your dates"}</b><small id="b-bar-s">${n2(draft.n)}</small></div><button class="btn primary" type="button" id="b-bar-go" disabled>Continue</button></div>`);
       const sum = $("#b-sum"), next = $("#b-next");
+      const barT = $("#b-bar-t"), barS = $("#b-bar-s"), barGo = $("#b-bar-go");
+      const bar = () => { barGo.disabled = !q; barT.textContent = q ? `${instant(u) ? "" : "≈ "}${R(q.total)}` : (u.fixed ? "Pick a start date" : "Pick your dates");
+        barS.textContent = q ? `${fmtShort(q.in)} → ${fmtShort(q.out)} · ${n2(draft.n)}` : n2(draft.n); };
+      barGo.onclick = () => next.click();
       cal = makeCal($("#b-cal"), u, { months: phone.matches ? 1 : 2, n: () => draft.n, sel: { in: draft.in, out: draft.out },
-        onChange: s => { draft.in = s.in; draft.out = s.out; q = quoteOf(u, cal, draft.n); sum.innerHTML = summaryHTML(u, q, draft.n); next.disabled = !q; } });
+        onChange: s => { draft.in = s.in; draft.out = s.out; q = quoteOf(u, cal, draft.n); sum.innerHTML = summaryHTML(u, q, draft.n); next.disabled = !q; bar(); } });
       bindStepper($("#b-n"), () => draft.n, v => { draft.n = v; cal.refresh(); }, u.beds);
       phone.onchange = () => cal && stage === 1 && cal.setMonths(phone.matches ? 1 : 2);
       next.onclick = () => { if (!cal.valid()) { toast(live ? "Those dates are no longer available. Pick again." : "Some of those nights are already booked. Pick again."); return; } q = quoteOf(u, cal, draft.n); s2(); };
@@ -546,7 +575,7 @@
     function s2() {
       stage = 2;
       if (live) {
-        shell(`<div class="hsflow">
+        shell(`<div class="hsflow sumfirst">
           <form class="card panel" id="payf">
             ${contactFields()}
             <label class="field">Notes for ${esc(u.who)} (optional)<textarea id="c-notes" rows="2" placeholder="e.g. one vegetarian, arriving late on day one">${esc(draft.notes || "")}</textarea></label>
@@ -561,7 +590,7 @@
           ${aside()}
         </div>`);
       } else {
-        shell(`<div class="hsflow">
+        shell(`<div class="hsflow sumfirst">
           <form class="card panel" id="payf">
             ${contactFields()}
             <label class="field hscheck"><input type="checkbox" id="c-flex" ${draft.flex ? "checked" : ""}> My dates are flexible by a few days if these nights aren't free</label>
