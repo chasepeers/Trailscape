@@ -16,7 +16,11 @@ export async function verifySvix(secret, headers, body, nowS = Math.floor(Date.n
   const id = headers.get("svix-id"), ts = headers.get("svix-timestamp"), sigs = headers.get("svix-signature");
   if (!secret || !id || !ts || !sigs) return false;
   if (!/^\d+$/.test(ts) || Math.abs(nowS - Number(ts)) > TOLERANCE_S) return false;
-  const keyBytes = Uint8Array.from(atob(secret.replace(/^whsec_/, "")), c => c.charCodeAt(0));
+  // Tolerate stray whitespace or quotes from pasting the secret into the dashboard.
+  const b64 = String(secret).trim().replace(/^["']|["']$/g, "").replace(/^whsec_/, "").replace(/\s+/g, "");
+  let keyBytes;
+  try { keyBytes = Uint8Array.from(atob(b64), c => c.charCodeAt(0)); }
+  catch { throw new HttpError(500, "RESEND_WEBHOOK_SECRET is not a valid whsec_ secret"); }
   const key = await crypto.subtle.importKey("raw", keyBytes, { name: "HMAC", hash: "SHA-256" }, false, ["sign"]);
   const mac = new Uint8Array(await crypto.subtle.sign("HMAC", key, new TextEncoder().encode(`${id}.${ts}.${body}`)));
   const expected = btoa(String.fromCharCode(...mac));
@@ -28,7 +32,17 @@ export async function verifySvix(secret, headers, body, nowS = Math.floor(Date.n
   });
 }
 
-export async function onRequestPost({ request, env }) {
+// Errors are reported in the response body (only Resend sees it, in its webhook log) so failures can be diagnosed there.
+export async function onRequestPost(ctx) {
+  try { return await handle(ctx); }
+  catch (err) {
+    if (err instanceof HttpError) return json({ error: err.message }, err.status);
+    console.error("inbound webhook", err && err.stack || err);
+    return json({ error: "Inbound handler failed", detail: String(err && err.message || err).slice(0, 300) }, 500);
+  }
+}
+
+async function handle({ request, env }) {
   if (!env.RESEND_WEBHOOK_SECRET) throw new HttpError(503, "Inbound email is not set up");
   const raw = await request.text();
   if (raw.length > 200_000) throw new HttpError(413, "Too large");
@@ -43,7 +57,7 @@ export async function onRequestPost({ request, env }) {
   const r = await fetch(`${resendApi(env)}/emails/receiving/${encodeURIComponent(meta.email_id)}`, {
     headers: { Authorization: `Bearer ${env.RESEND_API_KEY}` },
   });
-  if (!r.ok) { console.error("Fetch received email", r.status, await r.text()); throw new HttpError(502, "Could not fetch the message"); }
+  if (!r.ok) { const t = await r.text(); console.error("Fetch received email", r.status, t); throw new HttpError(502, `Could not fetch the message from Resend (${r.status}): ${t.slice(0, 200)}`); }
   const full = await r.json();
 
   const result = await recordInbound(env, env.DB, {
