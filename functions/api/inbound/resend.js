@@ -57,7 +57,7 @@ async function handle({ request, env }) {
   const r = await fetch(`${resendApi(env)}/emails/receiving/${encodeURIComponent(meta.email_id)}`, {
     headers: { Authorization: `Bearer ${env.RESEND_API_KEY}` },
   });
-  if (!r.ok) { const t = await r.text(); console.error("Fetch received email", r.status, t); throw new HttpError(502, `Could not fetch the message from Resend (${r.status}): ${t.slice(0, 200)}`); }
+  if (!r.ok) { const t = await r.text(); console.error("Fetch received email", r.status, t); throw new HttpError(500, `Could not fetch the message from Resend (${r.status}): ${t.slice(0, 200)}`); }
   const full = await r.json();
 
   const result = await recordInbound(env, env.DB, {
