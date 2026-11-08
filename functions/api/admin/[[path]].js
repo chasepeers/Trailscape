@@ -3,6 +3,10 @@
 //   GET    /api/admin/queue?show=open|all          enquiries and bookings, newest first
 //   GET    /api/admin/requests/HS-1100             one enquiry or booking with guest, stay and log
 //   POST   /api/admin/requests/HS-1100             { status?, quotedStay?, engineRef?, paymentStatus?, note? }
+//   POST   /api/admin/requests/HS-1100/ask         enquiry: email the stay (again) for availability
+//   POST   /api/admin/requests/HS-1100/answer      enquiry: { answer: available|unavailable, price?, note? } record the stay's
+//            answer (e.g. from an emailed reply). Emails the guest an offer (with a price) or a "full" note, as the answer page does.
+//   GET    /api/admin/inbound                      replies that matched no enquiry
 //            An enquiry set to "accepted" becomes a booking (source 'enquiry') at the quoted price and holds the beds.
 //            A booking set to "cancelled" or "failed" frees its beds.
 //   GET    /api/admin/blocks?stay=&from=&to=        blocked nights with their ids
@@ -12,15 +16,39 @@
 //   GET    /api/admin/stays?q=
 //   PATCH  /api/admin/stays/WC-064                  { pricePp?, beds?, mode?, engineRef?, bookingEmail?, bookingPhone?, active? }
 import { json, readJson, bad, HttpError, getStay, isDate, addDays, daysBetween, nightsOf, event, dateRange, FEE_PP, rand } from "../../../lib/api.js";
+import { askOperator, recordAnswer, answerUrl, replyAddress } from "../../../lib/operator.js";
 
 const ENQ_STATUS = ["new", "asked_operator", "operator_replied", "offer_sent", "accepted", "declined", "unavailable", "cancelled"];
 const BK_STATUS = ["received", "booking_operator", "confirmed", "cancelled", "failed"];
 const PAY_STATUS = ["none", "stub", "held", "paid", "refunded", "failed"];
 const OPEN_ENQ = "('new','asked_operator','operator_replied','offer_sent')", OPEN_BK = "('received','booking_operator')";
 
-export async function onRequest({ request, env, params }) {
+export async function onRequest({ request, env, params, data }) {
   const db = env.DB, method = request.method, url = new URL(request.url);
-  const [what, id] = params.path || [];
+  const [what, id, action] = params.path || [];
+
+  if (what === "requests" && id && action) {
+    if (method !== "POST") throw new HttpError(405, "Use POST");
+    const rec = await loadRequest(db, id, env);
+    if (rec.type !== "enquiry") throw bad("Only enquiries go to the stay by email");
+    if (action === "ask") {
+      const r = await askOperator(env, db, rec.ref, "admin");
+      if (!r.ok) throw bad(r.reason === "no_email" ? "This stay has no booking email. Add one under Stays first."
+        : r.reason === "email_off" ? "Email is switched off (RESEND_API_KEY missing)." : "Sending failed. Check the Resend dashboard and try again.");
+      return json(await loadRequest(db, rec.ref, env));
+    }
+    if (action === "answer") {
+      const b = await readJson(request);
+      const r = await recordAnswer(env, db, rec.ref, { answer: b.answer, price: b.price, note: b.note }, "admin");
+      return json({ ...(await loadRequest(db, rec.ref, env)), emailedGuest: r.emailedGuest });
+    }
+    throw new HttpError(404, "Not found");
+  }
+
+  if (what === "inbound" && method === "GET") {
+    const { results } = await db.prepare("SELECT * FROM inbound_unmatched ORDER BY id DESC LIMIT 100").all();
+    return json(results);
+  }
 
   if (what === "queue" && method === "GET") {
     const open = url.searchParams.get("show") !== "all";
@@ -42,9 +70,9 @@ export async function onRequest({ request, env, params }) {
   }
 
   if (what === "requests" && id) {
-    const rec = await loadRequest(db, id);
+    const rec = await loadRequest(db, id, env);
     if (method === "GET") return json(rec);
-    if (method === "POST") return json(await updateRequest(db, rec, await readJson(request)));
+    if (method === "POST") return json(await updateRequest(db, rec, await readJson(request), env));
   }
 
   if (what === "blocks") {
@@ -114,7 +142,7 @@ export async function onRequest({ request, env, params }) {
   throw new HttpError(404, "Not found");
 }
 
-async function loadRequest(db, ref) {
+async function loadRequest(db, ref, env = {}) {
   for (const type of ["enquiry", "booking"]) {
     const table = type === "enquiry" ? "enquiries" : "bookings";
     const row = await db.prepare(`SELECT t.*, g.name AS guest_name, g.email AS guest_email, g.phone AS guest_phone, g.consent_at,
@@ -122,13 +150,17 @@ async function loadRequest(db, ref) {
       FROM ${table} t JOIN guests g ON g.id = t.guest_id JOIN stays s ON s.id = t.stay_id WHERE t.ref = ?`).bind(ref).first();
     if (row) {
       const { results: log } = await db.prepare("SELECT at, actor, text FROM events WHERE ref = ? ORDER BY id").bind(ref).all();
-      return { type, ...row, log };
+      if (type === "booking") return { type, ...row, log };
+      const { results: messages } = await db.prepare("SELECT id, direction, channel, from_addr, to_addr, subject, body, at FROM enquiry_messages WHERE ref = ? ORDER BY id").bind(ref).all();
+      const { op_token, ...rest } = row;
+      return { type, ...rest, log, messages,
+        answerLink: op_token ? answerUrl(ref, op_token) : null, replyAddress: op_token ? replyAddress(env, ref, op_token) : null };
     }
   }
   throw new HttpError(404, "No enquiry or booking with that reference");
 }
 
-async function updateRequest(db, rec, b) {
+async function updateRequest(db, rec, b, env) {
   const stmts = [], notes = [];
   const table = rec.type === "enquiry" ? "enquiries" : "bookings";
   const sets = [], vals = [];
@@ -176,5 +208,5 @@ async function updateRequest(db, rec, b) {
   if (sets.length) stmts.unshift(db.prepare(`UPDATE ${table} SET ${sets.join(", ")}, updated_at = strftime('%Y-%m-%dT%H:%M:%SZ', 'now') WHERE ref = ?`).bind(...vals, rec.ref));
   stmts.push(...notes.map(n => event(db, rec.ref, "admin", n)));
   await db.batch(stmts);
-  return { ...(await loadRequest(db, rec.ref)), ...(bookingRef ? { createdBooking: bookingRef } : {}) };
+  return { ...(await loadRequest(db, rec.ref, env)), ...(bookingRef ? { createdBooking: bookingRef } : {}) };
 }

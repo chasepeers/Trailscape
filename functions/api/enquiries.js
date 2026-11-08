@@ -4,6 +4,7 @@
 // → { ref: "HS-1100", status: "enquiry" }
 import { json, readJson, getStay, cleanTrip, upsertGuest, nextRef, event, todaySA, addDays, daysBetween, bad, HttpError,
   sendEmail, notifyTo, rand, longDate } from "../../lib/api.js";
+import { askOperator } from "../../lib/operator.js";
 
 export async function onRequestPost({ request, env, waitUntil }) {
   const db = env.DB, body = await readJson(request);
@@ -24,17 +25,24 @@ export async function onRequestPost({ request, env, waitUntil }) {
   ]);
 
   const who = stay.op_key === "cn" || stay.op_key === "sp" ? stay.operator : stay.name;
-  waitUntil(Promise.all([
-    sendEmail(env, { to: notifyTo(env), replyTo: t.guest.email, subject: `New enquiry ${ref}: ${stay.name}, ${t.checkIn}`,
-      text: `${t.guest.name} (${t.guest.email}, ${t.guest.phone}) asked about ${stay.name} (${stay.operator}).\n\n`
-        + `${longDate(t.checkIn)} to ${longDate(t.checkOut)}, ${t.nights} night(s), ${t.hikers} hiker(s)${flexible ? ", dates flexible" : ""}.\n`
-        + `Guide total shown: ${guideTotal ? rand(guideTotal) : "n/a"}\nOperator contact: ${stay.booking_email || "none on file"} ${stay.booking_phone || ""}\n\n`
-        + `Notes: ${t.notes || "none"}\n\nOpen the back office: https://trailscape.co.za/admin.html#${ref}` }),
-    sendEmail(env, { to: t.guest.email, subject: `We're checking ${stay.name} for you (${ref})`,
-      text: `Hi ${t.guest.name.split(" ")[0]},\n\nThanks for your enquiry. We're asking ${who} about ${longDate(t.checkIn)} to ${longDate(t.checkOut)} `
-        + `for ${t.hikers} hiker(s), and will email you within about 48 hours with availability and the exact price. Nothing has been charged.\n\n`
-        + `Your reference is ${ref}. Just reply to this email if anything changes.\n\nTrailscape` }),
-  ]).catch(e => console.error("enquiry emails", e)));
+  // Email the stay first, so the admin note can say whether that worked; then the admin and the guest.
+  waitUntil((async () => {
+    const asked = await askOperator(env, db, ref).catch(e => { console.error("askOperator", e); return { ok: false, reason: "error" }; });
+    const stayLine = asked.ok ? `We've emailed ${stay.name} at ${asked.to}. Their answer will update this enquiry automatically.`
+      : asked.reason === "no_email" ? `ACTION NEEDED: ${stay.name} has no booking email on file, so it was NOT emailed. Add one under Stays in the back office, then press "Email the stay" on this enquiry.`
+      : `ACTION NEEDED: emailing ${stay.name} failed (${asked.reason}). Press "Email the stay" on this enquiry to try again.`;
+    await Promise.all([
+      sendEmail(env, { to: notifyTo(env), replyTo: t.guest.email, subject: `${asked.ok ? "" : "[Action] "}New enquiry ${ref}: ${stay.name}, ${t.checkIn}`,
+        text: `${t.guest.name} (${t.guest.email}, ${t.guest.phone}) asked about ${stay.name} (${stay.operator}).\n\n`
+          + `${longDate(t.checkIn)} to ${longDate(t.checkOut)}, ${t.nights} night(s), ${t.hikers} hiker(s)${flexible ? ", dates flexible" : ""}.\n`
+          + `Guide total shown: ${guideTotal ? rand(guideTotal) : "n/a"}\nOperator contact: ${stay.booking_email || "none on file"} ${stay.booking_phone || ""}\n\n`
+          + `${stayLine}\n\nNotes: ${t.notes || "none"}\n\nOpen the back office: https://trailscape.co.za/admin.html#${ref}` }),
+      sendEmail(env, { to: t.guest.email, replyTo: notifyTo(env), subject: `We're checking ${stay.name} for you (${ref})`,
+        text: `Hi ${t.guest.name.split(" ")[0]},\n\nThanks for your enquiry. We're asking ${who} about ${longDate(t.checkIn)} to ${longDate(t.checkOut)} `
+          + `for ${t.hikers} hiker(s), and will email you within about 48 hours with availability and the exact price. Nothing has been charged.\n\n`
+          + `Your reference is ${ref}. Just reply to this email if anything changes.\n\nTrailscape` }),
+    ]);
+  })().catch(e => console.error("enquiry emails", e)));
 
   return json({ ref, status: "enquiry" }, 201);
 }

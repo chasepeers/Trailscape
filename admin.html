@@ -35,6 +35,9 @@
   .log { display: grid; gap: 6px; font-size: .85rem; } .log div { display: grid; grid-template-columns: 92px 1fr; gap: 8px; } .log time { color: var(--muted); }
   h2 { font-size: 1.35rem; font-weight: 500; margin: 0; } h3 { font-size: 1rem; font-weight: 600; margin: 0; }
   .muted { color: var(--muted); } .err { color: var(--bad); font-size: .88rem; }
+  .msgs { display: grid; gap: 8px; } .msg { background: #fff; border: 1px solid var(--line); border-radius: 8px; padding: 8px 10px; font-size: .86rem; }
+  .msg.in { border-left: 3px solid var(--info); } .msg header { all: unset; display: flex; justify-content: space-between; gap: 8px; color: var(--muted); font-size: .78rem; }
+  .msg pre { white-space: pre-wrap; font: inherit; margin: 6px 0 0; max-height: 220px; overflow: auto; } .btnrow { display: flex; gap: 6px; flex-wrap: wrap; }
   #login { max-width: 360px; margin: 12vh auto; display: grid; gap: 12px; padding: 0 20px; }
   .toast { position: fixed; bottom: 18px; left: 50%; transform: translateX(-50%); background: var(--fg); color: #fff; padding: 9px 16px; border-radius: 999px; font-size: .9rem; z-index: 9; }
   @media (max-width: 860px) { main { grid-template-columns: 1fr; } #list { border-right: 0; border-bottom: 1px solid var(--line); } .kpis { grid-template-columns: repeat(2, 1fr); } }
@@ -78,10 +81,10 @@ function signedOut() {
 function shell() {
   $("#app").innerHTML = `<header><b>Trailscape back office</b><nav>
       <button data-show="open" aria-pressed="true">Needs action</button><button data-show="all" aria-pressed="false">Everything</button>
-      <button id="nblock">Block nights</button><button id="nstay">Stays &amp; prices</button><a class="btn" href="/" style="text-decoration:none">Site</a><button id="out">Sign out</button></nav></header>
+      <button id="nblock">Block nights</button><button id="nstay">Stays &amp; prices</button><button id="nunm">Unmatched replies</button><a class="btn" href="/" style="text-decoration:none">Site</a><button id="out">Sign out</button></nav></header>
     <main><section id="list"></section><aside id="side"><p class="muted">Pick an enquiry or booking.</p></aside></main>`;
   document.querySelectorAll("[data-show]").forEach(b => b.onclick = () => { show = b.dataset.show; document.querySelectorAll("[data-show]").forEach(x => x.setAttribute("aria-pressed", x === b)); queue(); });
-  $("#out").onclick = logout; $("#nblock").onclick = blockForm; $("#nstay").onclick = staysForm;
+  $("#out").onclick = logout; $("#nblock").onclick = blockForm; $("#nstay").onclick = staysForm; $("#nunm").onclick = unmatched;
   queue(); if (sel) detail(sel);
 }
 
@@ -118,6 +121,7 @@ async function detail(ref) {
     <div class="card"><h3>Operator</h3><div>${esc(d.operator)}${d.engine ? ` · ${esc(d.engine)}${d.stay_engine_ref ? " #" + esc(d.stay_engine_ref) : ""}` : ""}</div>
       <div>${d.booking_email ? `<a href="mailto:${esc(d.booking_email)}">${esc(d.booking_email)}</a>` : `<span class="muted">No email on file</span>`}${d.booking_phone ? " · " + esc(d.booking_phone) : ""}</div>
       <div class="muted" style="font-size:.85rem">Rate on file ${R(d.price_pp)} pp/night${d.price_estimated ? " (estimate)" : ""}</div></div>
+    ${enq ? stayEmailCard(d) : ""}
     <div class="card">${enq ? `
       <div class="row2"><span>Guide total shown</span><span>${R(d.guide_total)}</span></div>
       ${d.quoted_stay != null ? `<div class="row2"><span>Quoted</span><span>${R(d.quoted_stay)} + fee ${R(d.quoted_fee)} = ${R(d.quoted_stay + d.quoted_fee)}</span></div>` : ""}
@@ -136,6 +140,7 @@ async function detail(ref) {
       <button class="primary">Save</button><p class="err" id="u-err"></p></form>
     <div><h3 style="margin-bottom:6px">Log</h3><div class="log">${d.log.map(l => `<div><time>${when(l.at)}</time><span>${esc(l.text)} <span class="muted">· ${esc(l.actor)}</span></span></div>`).join("")}</div></div>`;
   if ($("#golink")) $("#golink").onclick = e => { e.preventDefault(); detail(d.booking_ref); };
+  if (enq) bindStayEmail(d);
   $("#upd").onsubmit = async e => {
     e.preventDefault();
     const body = {};
@@ -147,6 +152,49 @@ async function detail(ref) {
     try { const res = await api("/requests/" + encodeURIComponent(d.ref), { method: "POST", body: JSON.stringify(body) }); toast(res.createdBooking ? "Booking " + res.createdBooking + " created" : "Saved"); queue(); detail(d.ref); }
     catch (err) { $("#u-err").textContent = err.message; }
   };
+}
+
+// Easy enquire: the availability email to the stay, its answer and the email thread.
+function stayEmailCard(d) {
+  const open = ["new", "asked_operator", "operator_replied", "offer_sent", "unavailable"].includes(d.status);
+  const answer = d.op_answer ? `<div class="row2"><span>Stay's answer</span><span>${d.op_answer === "available" ? `<span class="tag ok">Has space</span>` : `<span class="tag bad">Full</span>`}${d.op_price != null ? " " + R(d.op_price) : ""}</span></div>
+      ${d.op_note ? `<div class="muted" style="font-size:.85rem">“${esc(d.op_note)}”</div>` : ""}` : "";
+  return `<div class="card"><h3>Stay email</h3>
+    <div class="row2"><span>Asked</span><span>${d.op_asked_at ? when(d.op_asked_at) : `<span class="tag warn">Not emailed yet</span>`}</span></div>
+    ${answer}
+    ${d.answerLink ? `<div class="muted" style="font-size:.8rem">Answer page: <a href="${esc(d.answerLink)}" target="_blank" rel="noopener">open</a>${d.replyAddress ? ` · replies to <span class="mono">${esc(d.replyAddress)}</span>` : ""}</div>` : ""}
+    ${open ? `<div class="btnrow"><button id="op-ask" ${d.booking_email ? "" : "disabled title=\"Add a booking email under Stays first\""}>${d.op_asked_at ? "Send reminder" : "Email the stay"}</button></div>
+    <form id="op-ans" style="display:grid;gap:8px"><span class="muted" style="font-size:.85rem">Got an answer by email or phone? Record it here. A price or a “full” answer emails the guest.</span>
+      <div class="grid2"><label>Total for the group (R)<input id="op-price" type="number" min="0" step="1" value="${d.op_price ?? ""}" placeholder="e.g. 4800"></label>
+      <label>Note<input id="op-note" value="${esc(d.op_note || "")}" placeholder="optional"></label></div>
+      <div class="btnrow"><button class="primary" data-a="available">Has space</button><button data-a="unavailable">Full</button></div><p class="err" id="op-err"></p></form>` : ""}
+    ${d.messages && d.messages.length ? `<div class="msgs">${d.messages.map(m => `<div class="msg ${m.direction}"><header><span>${m.direction === "in" ? (m.channel === "form" ? "Answer page" : "From " + esc(m.from_addr)) : "To " + esc(m.to_addr)}</span><time>${when(m.at)}</time></header>
+      ${m.subject && m.channel === "email" ? `<div><b>${esc(m.subject)}</b></div>` : ""}<pre>${esc(m.body)}</pre></div>`).join("")}</div>` : ""}</div>`;
+}
+function bindStayEmail(d) {
+  const ask = $("#op-ask"); if (ask) ask.onclick = async () => {
+    ask.disabled = true;
+    try { await api("/requests/" + encodeURIComponent(d.ref) + "/ask", { method: "POST" }); toast("Emailed the stay"); queue(); detail(d.ref); }
+    catch (err) { ask.disabled = false; $("#op-err").textContent = err.message; }
+  };
+  const f = $("#op-ans"); if (!f) return;
+  f.querySelectorAll("button[data-a]").forEach(b => b.onclick = async e => {
+    e.preventDefault();
+    const a = b.dataset.a, price = $("#op-price").value, note = $("#op-note").value.trim();
+    if (!confirm(a === "unavailable" ? "Mark as full and email the guest?" : price ? `Record ${R(+price)} and email the guest an offer?` : "Record “has space” without a price? The guest is emailed once you add the price.")) return;
+    try { const r = await api("/requests/" + encodeURIComponent(d.ref) + "/answer", { method: "POST", body: JSON.stringify({ answer: a, price: price || null, note }) });
+      toast(r.emailedGuest ? "Saved, guest emailed" : "Saved"); queue(); detail(d.ref); }
+    catch (err) { $("#op-err").textContent = err.message; }
+  });
+}
+async function unmatched() {
+  sel = null; history.replaceState(null, "", location.pathname);
+  const side = $("#side"); side.innerHTML = `<p class="muted">Loading…</p>`;
+  try {
+    const rows = await api("/inbound");
+    side.innerHTML = `<div class="card"><h3>Unmatched replies</h3><p class="muted" style="margin:0;font-size:.85rem">Emails to the reply address that didn't match an enquiry. Each was also forwarded to you.</p></div>
+      ${rows.length ? `<div class="msgs">${rows.map(m => `<div class="msg in"><header><span>From ${esc(m.from_addr)}</span><time>${when(m.at)}</time></header><div><b>${esc(m.subject)}</b></div><pre>${esc(m.body)}</pre></div>`).join("")}</div>` : `<p class="muted">None.</p>`}`;
+  } catch (err) { side.innerHTML = `<p class="err">${esc(err.message)}</p>`; }
 }
 
 function blockForm() {
