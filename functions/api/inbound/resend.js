@@ -53,12 +53,20 @@ async function handle({ request, env }) {
   const meta = evt.data || {};
   if (!meta.email_id) throw new HttpError(400, "No email_id");
 
-  // Fetch body and headers. If Resend can't give it to us yet, fail so the webhook is retried.
-  const r = await fetch(`${resendApi(env)}/emails/receiving/${encodeURIComponent(meta.email_id)}`, {
-    headers: { Authorization: `Bearer ${env.RESEND_API_KEY}` },
-  });
-  if (!r.ok) { const t = await r.text(); console.error("Fetch received email", r.status, t); throw new HttpError(500, `Could not fetch the message from Resend (${r.status}): ${t.slice(0, 200)}`); }
-  const full = await r.json();
+  // Fetch body and headers. If that fails (e.g. a sending-only API key can't read received emails), still record the
+  // reply from the webhook's metadata, so it is matched to its enquiry and forwarded, with a pointer to Resend for the text.
+  let full = {}, fetchProblem = null;
+  try {
+    const r = await fetch(`${resendApi(env)}/emails/receiving/${encodeURIComponent(meta.email_id)}`, {
+      headers: { Authorization: `Bearer ${env.RESEND_API_KEY}` },
+    });
+    if (r.ok) full = await r.json();
+    else { const t = await r.text(); fetchProblem = `Resend ${r.status}: ${t.slice(0, 200)}`; console.error("Fetch received email", fetchProblem); }
+  } catch (err) { fetchProblem = String(err && err.message || err).slice(0, 200); console.error("Fetch received email", fetchProblem); }
+  if (fetchProblem && !full.text && !full.html) {
+    full.text = `(Trailscape couldn't read this message's text from Resend: ${fetchProblem}. `
+      + `Open it in Resend → Emails → Receiving, or check that RESEND_API_KEY has full access.)`;
+  }
 
   const result = await recordInbound(env, env.DB, {
     id: meta.email_id,
@@ -70,5 +78,5 @@ async function handle({ request, env }) {
     text: full.text,
     html: full.html,
   });
-  return json({ ok: true, ...result });
+  return json({ ok: true, ...result, ...(fetchProblem ? { bodyFetch: fetchProblem } : {}) });
 }
