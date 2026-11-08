@@ -31,7 +31,7 @@ async function find(db, ref, token) {
 
 function tripHtml(e) {
   return `<dl><dt>Arriving</dt><dd>${esc(longDate(e.check_in))}</dd><dt>Leaving</dt><dd>${esc(longDate(e.check_out))}</dd>
-    <dt>Nights</dt><dd>${e.nights}</dd><dt>Group</dt><dd>${e.hikers} hiker${e.hikers === 1 ? "" : "s"}</dd><dt>Lead guest</dt><dd>${esc(e.guest_name)}</dd>
+    <dt>Nights</dt><dd>${e.nights}</dd><dt>Group</dt><dd>${e.hikers} guest${e.hikers === 1 ? "" : "s"}</dd><dt>Lead guest</dt><dd>${esc(e.guest_name)}</dd>
     ${e.flexible ? `<dt>Dates</dt><dd>Flexible</dd>` : ""}</dl>${e.notes ? `<p class="muted">“${esc(e.notes)}”</p>` : ""}`;
 }
 
@@ -48,7 +48,7 @@ export async function onRequestGet({ env, params, request }) {
     <input type="hidden" name="t" value="${esc(token)}">
     <label for="price">Total price for the group (rand)</label>
     <input id="price" name="price" inputmode="numeric" placeholder="e.g. 4800" value="${e.op_price ?? ""}">
-    <small>The full amount for all ${e.hikers} for ${e.nights} night${e.nights === 1 ? "" : "s"}. Leave empty if you'd rather reply by email.</small>
+    <small>The full amount for all ${e.hikers} guest${e.hikers === 1 ? "" : "s"} for ${e.nights} night${e.nights === 1 ? "" : "s"}. Leave empty if you'd rather reply by email.</small>
     <label for="note">Anything else? (optional)</label>
     <textarea id="note" name="note" rows="3" placeholder="e.g. Only the 4-bed cottage is free, or we have space the weekend after">${esc(e.op_note || "")}</textarea>
     <div class="btns"><button class="yes" name="answer" value="available">Yes, we have space</button>
