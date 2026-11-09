@@ -87,11 +87,14 @@
     const regionKey = REG_OF[s.region] || "west";
     return { id: s.id, src: "stay", name: s.name, op: s.k, opLabel: s.operator, color: BOOK_MODES[modeOf(s.k, s.id)].c, kind: s.type, regionKey, region: REG[regionKey],
       lat: s.lat, lng: s.lng, price: priceOf(s), est: true, beds: bedsOf(s), fixed: 0, mode: modeOf(s.k, s.id), engine: bookEngine(s.k, s.id), who: whoOf(s.k, s.operator, s.name, false), loc: s.loc, hike: s.hike, notes: s.notes, permit: /permit/i.test(s.book),
-      trailOf: trail ? trail.id : null, photo: null };
+      trailOf: trail ? trail.id : null, photo: null, rooms: s.rooms || [] };
   }
   PLACES.forEach(p => U.set(p.id, fromPlace(p)));
 
   function loadStays() {
+    // stays.js has removed stays without provider consent from PLACES and STAYS; drop them here too, and add room types.
+    const shown = new Set(PLACES.map(p => p.id)), rooms = window.STAY_ROOMS || {};
+    for (const [id, u] of [...U]) { if (u.src === "place") { if (!shown.has(id)) U.delete(id); else u.rooms = rooms[id] || []; } }
     const single = PLACES.filter(p => !(p.nights > 1 && /trail|route|slackpack/i.test(p.kind)));
     STAYS.forEach(s => {
       const twin = single.find(p => norm(s.name).includes(norm(p.name)));
@@ -251,6 +254,11 @@
   .hsflow { display: grid; grid-template-columns: minmax(0, 1fr) 340px; gap: 24px; align-items: start; }
   .hsflow > aside { position: sticky; top: 88px; display: grid; gap: 14px; }
   .hsbox { display: grid; gap: 14px; }
+  .hsrooms { display: grid; gap: 8px; margin: 8px 0; }
+  .hsroom { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1.1fr); gap: 4px 16px; border: 1px solid var(--line); border-radius: 10px; padding: 10px 14px; }
+  @media (max-width: 600px) { .hsroom { grid-template-columns: 1fr; } }
+  .hsroom > div { display: grid; gap: 2px; min-width: 0; } .hsroom .muted { font-size: .85rem; }
+  .hsrates { text-align: right; font-size: .92rem; display: grid; gap: 2px; align-content: start; } @media (max-width: 600px) { .hsrates { text-align: left; } }
   .hsbox .price small { font-size: .8rem; }
   .hsest { font: .68rem "Fragment Mono", ui-monospace, monospace; color: var(--muted); background: var(--band); border-radius: 4px; padding: 1px 5px; margin-left: 4px; vertical-align: 2px; }
   .hsnote { font-size: .85rem; color: var(--muted); background: var(--band); border-radius: 8px; padding: 10px 12px; }
@@ -453,6 +461,18 @@
   const notReady = () => { view.innerHTML = `<div class="wrap phead"><p class="muted">Loading stays…</p></div>`; };
   const notFound = () => { view.innerHTML = `<div class="wrap phead"><div class="eyebrow">Stays</div><h1>We couldn't find that stay</h1><p class="lead"><a href="#stays">See every stay</a> or <a href="#map">find one on the map</a>.</p></div>`; };
 
+  // Room types and nightly rates from the back office (Venues & rooms). Rates are the provider's own; the exact total is
+  // confirmed when we book.
+  const roomDates = r => r.from || r.to ? ` <span class="muted">(${[r.from, r.to].map(d => d ? fmt(d, { day: "numeric", month: "short" }) : "…").join(" – ")})</span>` : "";
+  function roomsHTML(u) {
+    if (!u.rooms || !u.rooms.length) return "";
+    return `<h2>Rooms and rates</h2><div class="hsrooms">${u.rooms.map(r => `<div class="hsroom"><div><b>${esc(r.name)}</b>
+        <span class="muted">${[r.sleeps ? "Sleeps " + r.sleeps : "", r.beds ? esc(r.beds) : "", r.units > 1 ? r.units + " available" : ""].filter(Boolean).join(" · ")}</span>
+        ${r.included ? `<span class="muted">${esc(r.included)}</span>` : ""}</div>
+        <div class="hsrates">${r.rates.length ? r.rates.map(x => `<span><b>${R(x.amount)}</b> ${x.basis === "person" ? "pp" : "per unit"} / night${x.label && x.label !== "Standard" ? ` · ${esc(x.label)}` : ""}${roomDates(x)}${x.minNights ? ` · min ${x.minNights} nights` : ""}</span>`).join("") : `<span class="muted">Rate on request</span>`}</div></div>`).join("")}</div>
+      <p class="muted" style="font-size:.88rem">Rates are set by the stay and may change; we confirm the exact price before you pay.</p>`;
+  }
+
   // ---------- stay page ----------
   hut = function (id) {
     if (DUP[id]) { location.replace("#stay-" + DUP[id]); return; }
@@ -479,6 +499,7 @@
           ${u.hike ? `<h2>Hiking nearby</h2><p>${esc(u.hike)}</p>` : ""}
           ${u.stops && u.stops.length ? `<h2>Overnight stops</h2><div class="hutchips">${u.stops.map(h => `<span>${esc(h)}</span>`).join("")}</div>` : ""}
           ${u.notes ? `<h2>Good to know</h2><p>${esc(u.notes)}</p>` : ""}
+          ${roomsHTML(u)}
           ${u.permit ? `<p>An overnight permit is needed here. We arrange it as part of your booking.</p>` : ""}
           <h2>How booking works</h2>
           ${instant(u)
@@ -775,7 +796,7 @@
   if (ROUTES.has(route())) nav();
   let tries = 0;
   (function wait() {
-    if (typeof STAYS !== "undefined") { loadStays(); if (ROUTES.has(route())) nav(); return; }
+    if (typeof STAYS !== "undefined" && window.STAYS_READY) { loadStays(); if (ROUTES.has(route())) nav(); return; }
     if (++tries > 300) { console.warn("Accommodation data did not load; only trail packages are bookable"); ready = true; if (ROUTES.has(route())) nav(); return; }
     setTimeout(wait, 50);
   })();

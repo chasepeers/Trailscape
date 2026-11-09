@@ -14,9 +14,18 @@
 //   DELETE /api/admin/blocks/123
 //   PUT    /api/admin/availability                  { stayId, nights: [{ date, status, bedsLeft, price? }] }  (instant stays)
 //   GET    /api/admin/stays?q=
-//   PATCH  /api/admin/stays/WC-064                  { pricePp?, beds?, mode?, engineRef?, bookingEmail?, bookingPhone?, active? }
+//   PATCH  /api/admin/stays/WC-064                  { pricePp?, beds?, mode?, engineRef?, bookingEmail?, bookingPhone?, active?,
+//            consent?, consentNote?, contactName?, ratesUrl?, ratesChecked? }   consent decides whether the stay shows on the site
+//   GET    /api/admin/venues?q=&consent=yes|no&email=missing&rooms=missing   every stay with contact, consent and room counts
+//   GET    /api/admin/venues/WC-064                 one stay with all its rooms and rates
+//   POST   /api/admin/venues/WC-064/rooms           { name, sleeps?, bedSetup?, units?, included?, notes?, rates?: [rate] }
+//   PATCH  /api/admin/rooms/12  DELETE /api/admin/rooms/12  POST /api/admin/rooms/12/rates  { label?, amount, basis: unit|person,
+//            validFrom?, validTo?, minNights?, extraPerson?, notes? }   PATCH / DELETE /api/admin/rates/34
+//   GET    /api/admin/rooms-csv                     every room and rate as a spreadsheet (one line per rate)
+//   POST   /api/admin/rooms-import                  { csv, apply? }  checks the file (apply false) or saves it; never deletes
 import { json, readJson, bad, HttpError, getStay, isDate, addDays, daysBetween, nightsOf, event, dateRange, FEE_PP, rand } from "../../../lib/api.js";
 import { askOperator, recordAnswer, answerUrl, replyAddress } from "../../../lib/operator.js";
+import { cleanRoom, cleanRate, insertSql, updateSql, touchRates, roomsOf, toCsv, parseCsv } from "../../../lib/rooms.js";
 
 const ENQ_STATUS = ["new", "asked_operator", "operator_replied", "offer_sent", "accepted", "declined", "unavailable", "cancelled"];
 const BK_STATUS = ["received", "booking_operator", "confirmed", "cancelled", "failed"];
@@ -112,6 +121,147 @@ export async function onRequest({ request, env, params, data }) {
     return json({ ok: true, nights: stmts.length });
   }
 
+  // ---------- Venues: every stay with its contact, consent, rooms and rates ----------
+  if (what === "venues" && method === "GET" && !id) {
+    const q = "%" + (url.searchParams.get("q") || "").trim() + "%", c = url.searchParams.get("consent");
+    const where = ["(s.name LIKE ? OR s.id LIKE ? OR s.operator LIKE ? OR s.kind LIKE ?)"];
+    if (c === "yes") where.push("s.consent = 1"); else if (c === "no") where.push("s.consent = 0");
+    if (url.searchParams.get("email") === "missing") where.push("(s.booking_email IS NULL OR s.booking_email = '')");
+    if (url.searchParams.get("rooms") === "missing") where.push("NOT EXISTS (SELECT 1 FROM rooms m WHERE m.stay_id = s.id AND m.active = 1)");
+    const { results } = await db.prepare(`
+      SELECT s.id, s.name, s.operator, s.op_key, s.kind, s.mode, s.booking_email, s.booking_phone, s.contact_name, s.consent, s.consent_at,
+             s.rates_url, s.rates_checked_at,
+             (SELECT COUNT(*) FROM rooms m WHERE m.stay_id = s.id AND m.active = 1) AS rooms,
+             (SELECT COUNT(*) FROM room_rates r JOIN rooms m ON m.id = r.room_id WHERE m.stay_id = s.id AND m.active = 1) AS rates,
+             (SELECT MIN(r.amount) FROM room_rates r JOIN rooms m ON m.id = r.room_id WHERE m.stay_id = s.id AND m.active = 1) AS from_rate
+        FROM stays s WHERE ${where.join(" AND ")} ORDER BY s.consent DESC, s.name LIMIT 400`).bind(q, q, q, q).all();
+    const counts = await db.prepare(`SELECT COUNT(*) AS total, SUM(consent) AS consented,
+      SUM(booking_email IS NULL OR booking_email = '') AS no_email,
+      SUM(NOT EXISTS (SELECT 1 FROM rooms m WHERE m.stay_id = stays.id AND m.active = 1)) AS no_rooms FROM stays`).first();
+    return json({ counts, items: results });
+  }
+  if (what === "venues" && id && !action && method === "GET") {
+    const s = await db.prepare("SELECT * FROM stays WHERE id = ?").bind(id).first();
+    if (!s) throw new HttpError(404, "Unknown stay");
+    return json({ ...s, roomList: (await roomsOf(db, [id], true))[id] || [] });
+  }
+  if (what === "venues" && id && action === "rooms" && method === "POST") {
+    const s = await db.prepare("SELECT id FROM stays WHERE id = ?").bind(id).first();
+    if (!s) throw new HttpError(404, "Unknown stay");
+    const b = await readJson(request), room = cleanRoom(b);
+    const rates = (Array.isArray(b.rates) ? b.rates : []).map(r => cleanRate(r));   // checked before anything is saved
+    if (room.sort == null) room.sort = await db.prepare("SELECT COALESCE(MAX(sort), 0) + 1 AS n FROM rooms WHERE stay_id = ?").bind(id).first("n");
+    const [sql, vals] = insertSql("rooms", { stay_id: id, ...room });
+    const roomId = (await db.prepare(sql + " RETURNING id").bind(...vals).first("id"));
+    const stmts = rates.map(r => { const [q2, v2] = insertSql("room_rates", { room_id: roomId, ...r }); return db.prepare(q2).bind(...v2); });
+    await db.batch([...stmts, touchRates(db, id)]);
+    return json({ ok: true, roomId }, 201);
+  }
+
+  if (what === "rooms" && id) {
+    const room = await db.prepare("SELECT * FROM rooms WHERE id = ?").bind(Number(id)).first();
+    if (!room) throw new HttpError(404, "Unknown room");
+    if (action === "rates" && method === "POST") {
+      const [sql, vals] = insertSql("room_rates", { room_id: room.id, ...cleanRate(await readJson(request)) });
+      await db.batch([db.prepare(sql).bind(...vals), touchRates(db, room.stay_id)]);
+      return json({ ok: true }, 201);
+    }
+    if (!action && method === "PATCH") {
+      const ch = cleanRoom(await readJson(request), true);
+      if (!Object.keys(ch).length) throw bad("Nothing to change");
+      const [sql, vals] = updateSql("rooms", ch, room.id);
+      await db.batch([db.prepare(sql).bind(...vals), touchRates(db, room.stay_id)]);
+      return json({ ok: true });
+    }
+    if (!action && method === "DELETE") {
+      await db.batch([db.prepare("DELETE FROM room_rates WHERE room_id = ?").bind(room.id), db.prepare("DELETE FROM rooms WHERE id = ?").bind(room.id), touchRates(db, room.stay_id)]);
+      return json({ ok: true });
+    }
+  }
+  if (what === "rates" && id) {
+    const rate = await db.prepare("SELECT r.*, m.stay_id FROM room_rates r JOIN rooms m ON m.id = r.room_id WHERE r.id = ?").bind(Number(id)).first();
+    if (!rate) throw new HttpError(404, "Unknown rate");
+    if (method === "PATCH") {
+      const ch = cleanRate(await readJson(request), true);
+      const from = ch.valid_from !== undefined ? ch.valid_from : rate.valid_from, to = ch.valid_to !== undefined ? ch.valid_to : rate.valid_to;
+      if (from && to && to < from) throw bad("The rate's end date is before its start date");
+      if (!Object.keys(ch).length) throw bad("Nothing to change");
+      const [sql, vals] = updateSql("room_rates", ch, rate.id);
+      await db.batch([db.prepare(sql).bind(...vals), touchRates(db, rate.stay_id)]);
+      return json({ ok: true });
+    }
+    if (method === "DELETE") {
+      await db.batch([db.prepare("DELETE FROM room_rates WHERE id = ?").bind(rate.id), touchRates(db, rate.stay_id)]);
+      return json({ ok: true });
+    }
+  }
+
+  // Spreadsheet round trip: download every room and rate, edit in Excel or Google Sheets, upload again.
+  if (what === "rooms-csv" && method === "GET") {
+    const { results } = await db.prepare(`
+      SELECT s.id AS stay_id, s.name AS stay_name, m.id AS room_id, m.name AS room_name, m.sleeps, m.bed_setup, m.units, m.included,
+             r.id AS rate_id, r.label AS rate_label, r.amount, r.basis, r.valid_from, r.valid_to, r.min_nights, r.extra_person, r.notes AS rate_notes
+        FROM stays s LEFT JOIN rooms m ON m.stay_id = s.id AND m.active = 1 LEFT JOIN room_rates r ON r.room_id = m.id
+       ${url.searchParams.get("all") ? "" : "WHERE m.id IS NOT NULL OR s.consent = 1"}
+       ORDER BY s.name, m.sort, m.id, r.valid_from, r.amount`).all();
+    return new Response("﻿" + toCsv(results), { headers: { "Content-Type": "text/csv; charset=utf-8", "Cache-Control": "no-store",
+      "Content-Disposition": `attachment; filename="trailscape-rooms-${new Date().toISOString().slice(0, 10)}.csv"` } });
+  }
+  if (what === "rooms-import" && method === "POST") {
+    const b = await readJson(request, 2_000_000), apply = !!b.apply;
+    const rows = parseCsv(b.csv);
+    if (!rows.length) throw bad("The file has no rows");
+    if (!("stay_id" in rows[0]) || !("room_name" in rows[0])) throw bad("The file needs the stay_id and room_name columns. Start from a download of this list.");
+    const { results: stayRows } = await db.prepare("SELECT id FROM stays").all();
+    const stayIds = new Set(stayRows.map(s => s.id));
+    const { results: roomRows } = await db.prepare("SELECT id, stay_id FROM rooms").all();
+    const roomStay = new Map(roomRows.map(r => [r.id, r.stay_id]));
+    const { results: rateRows } = await db.prepare("SELECT id, room_id FROM room_rates").all();
+    const rateRoom = new Map(rateRows.map(r => [r.id, r.room_id]));
+    const sum = { roomsNew: 0, roomsUpdated: 0, ratesNew: 0, ratesUpdated: 0, skipped: 0 }, errors = [], touched = new Set();
+    const newRooms = new Map();   // "stay|room name" → rows creating that room, so one new room can carry several rates
+    const stmts = [], updatedRooms = new Set();
+    rows.forEach((r, i) => {
+      const line = i + 2;
+      try {
+        if (!r.room_name && !r.amount) { sum.skipped++; return; }
+        if (!stayIds.has(r.stay_id)) throw bad(`Unknown stay_id "${r.stay_id}"`);
+        const room = cleanRoom({ name: r.room_name, sleeps: r.sleeps, bedSetup: r.bed_setup, units: r.units, included: r.included }, true);
+        const hasRate = r.amount !== "" && r.amount != null;
+        const rate = hasRate ? cleanRate({ label: r.rate_label, amount: r.amount, basis: r.basis, validFrom: r.valid_from, validTo: r.valid_to,
+          minNights: r.min_nights, extraPerson: r.extra_person, notes: r.rate_notes }) : null;
+        touched.add(r.stay_id);
+        const roomId = r.room_id ? Number(r.room_id) : null;
+        if (roomId) {
+          if (roomStay.get(roomId) !== r.stay_id) throw bad(`room_id ${roomId} does not belong to ${r.stay_id}`);
+          if (!updatedRooms.has(roomId)) { const [s1, v1] = updateSql("rooms", room, roomId); stmts.push(db.prepare(s1).bind(...v1)); updatedRooms.add(roomId); sum.roomsUpdated++; }
+          const rateId = r.rate_id ? Number(r.rate_id) : null;
+          if (rateId) {
+            if (rateRoom.get(rateId) !== roomId) throw bad(`rate_id ${rateId} does not belong to room ${roomId}`);
+            if (rate) { const [s2, v2] = updateSql("room_rates", rate, rateId); stmts.push(db.prepare(s2).bind(...v2)); sum.ratesUpdated++; }
+          } else if (rate) {
+            const [s2, v2] = insertSql("room_rates", { room_id: roomId, ...rate }); stmts.push(db.prepare(s2).bind(...v2)); sum.ratesNew++;
+          }
+        } else {
+          if (!room.name) throw bad("room_name is empty");
+          const key = r.stay_id + "|" + room.name.toLowerCase();
+          if (!newRooms.has(key)) { newRooms.set(key, { stay: r.stay_id, room, rates: [] }); sum.roomsNew++; }
+          if (rate) { newRooms.get(key).rates.push(rate); sum.ratesNew++; }
+        }
+      } catch (err) { errors.push(`Line ${line}: ${err.message}`); }
+    });
+    if (errors.length || !apply) return json({ applied: false, ...sum, stays: touched.size, errors: errors.slice(0, 50) });
+    // New rooms need their id before their rates, so they go one by one; everything else goes in one batch.
+    for (const n of newRooms.values()) {
+      const [s1, v1] = insertSql("rooms", { stay_id: n.stay, ...n.room });
+      const rid = await db.prepare(s1 + " RETURNING id").bind(...v1).first("id");
+      for (const rate of n.rates) { const [s2, v2] = insertSql("room_rates", { room_id: rid, ...rate }); stmts.push(db.prepare(s2).bind(...v2)); }
+    }
+    stmts.push(...[...touched].map(sid => touchRates(db, sid)));
+    if (stmts.length) await db.batch(stmts);
+    return json({ applied: true, ...sum, stays: touched.size, errors: [] });
+  }
+
   if (what === "stays") {
     if (method === "GET" && !id) {
       const q = "%" + (url.searchParams.get("q") || "") + "%";
@@ -132,6 +282,11 @@ export async function onRequest({ request, env, params, data }) {
       for (const [k, col] of [["engineRef", "engine_ref"], ["bookingEmail", "booking_email"], ["bookingPhone", "booking_phone"], ["engine", "engine"]])
         if (b[k] !== undefined) put(col, b[k] ? String(b[k]).slice(0, 200) : null);
       if (b.active != null) put("active", b.active ? 1 : 0);
+      for (const [k, col, max] of [["contactName", "contact_name", 120], ["ratesUrl", "rates_url", 500], ["consentNote", "consent_note", 300]])
+        if (b[k] !== undefined) put(col, b[k] ? String(b[k]).trim().slice(0, max) : null);
+      if (b.bookingEmail && !/^[^\s@<>()",;]+@[^\s@<>()",;]+\.[a-z]{2,}$/i.test(String(b.bookingEmail).trim())) throw bad("That booking email doesn't look right");
+      if (b.consent != null) { put("consent", b.consent ? 1 : 0); if (b.consent) put("consent_at", new Date().toISOString().slice(0, 19) + "Z"); }
+      if (b.ratesChecked) put("rates_checked_at", new Date().toISOString().slice(0, 19) + "Z");
       if (!sets.length) throw bad("Nothing to change");
       const r = await db.prepare(`UPDATE stays SET ${sets.join(", ")}, updated_at = strftime('%Y-%m-%dT%H:%M:%SZ', 'now') WHERE id = ?`).bind(...vals, id).run();
       if (!r.meta.changes) throw new HttpError(404, "Unknown stay");

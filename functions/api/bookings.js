@@ -8,7 +8,7 @@
 //
 // PAYMENT IS A STUB: no gateway is connected yet, so nothing is charged and the booking waits in the back office
 // with payment_status 'stub'. When a gateway is chosen, takePayment() is the one place to change.
-import { json, readJson, getStay, cleanTrip, upsertGuest, nextRef, event, nightlyAvailability, todaySA, addDays, nightsOf, bad, HttpError,
+import { json, readJson, getListedStay, cleanTrip, upsertGuest, nextRef, event, nightlyAvailability, todaySA, addDays, nightsOf, bad, HttpError,
   FEE_PP, sendEmail, notifyTo, rand, longDate } from "../../lib/api.js";
 
 // Placeholder for the payment gateway (Peach Payments / Paystack: pre-authorise, then capture once the operator confirms).
@@ -18,7 +18,7 @@ async function takePayment(/* env, { ref, amount, method, guest } */) {
 
 export async function onRequestPost({ request, env, waitUntil }) {
   const db = env.DB, body = await readJson(request);
-  const stay = await getStay(db, String(body.stayId || ""));
+  const stay = await getListedStay(db, String(body.stayId || ""));
   if (stay.mode !== "instant") throw new HttpError(409, "This is an Easy enquire stay; use /api/enquiries");
   const t = cleanTrip(body, stay);
   if (t.checkIn < addDays(todaySA(), 1)) throw bad("Pick a check-in date from tomorrow onwards");

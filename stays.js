@@ -2,12 +2,32 @@
 // Loaded after app.js. Loads stays-data.js (the spreadsheet rows), then adds every listing to the Map page
 // as a ring-shaped dot; tapping a dot opens a card (a bottom sheet on phones) with details, contacts and website.
 // It extends mapPage() rather than editing it, using app.js globals: maps, OPS, esc, $, store, nav, FONT.
+//
+// Consent (9 Nov 2026): only stays whose provider has agreed to be listed are shown. /api/stays gives their ids and their
+// room types and rates (kept in the back office under Venues & rooms). Hidden stays are taken out of STAYS (accommodation)
+// and PLACES (trail packages) before anything else uses them; booking.js waits for window.STAYS_READY.
+// If the API can't be reached, only CapeNature and SANParks stays are shown (the public operators).
 (() => {
+  const listing = fetch("/api/stays", { credentials: "same-origin" }).then(r => r.ok ? r.json() : Promise.reject(r.status)).catch(err => {
+    console.warn("Listed stays could not be loaded; showing CapeNature and SANParks only", err); return null; });
   const s = document.createElement("script");
   s.src = "stays-data.js";
-  s.onload = init;
-  s.onerror = () => console.warn("Accommodation data could not be loaded");
+  s.onload = () => listing.then(apply).then(init, err => { console.error(err); window.STAYS_READY = true; });
+  s.onerror = () => { console.warn("Accommodation data could not be loaded"); window.STAYS_READY = true; };
   document.head.appendChild(s);
+
+  function apply(data) {
+    const listed = data ? new Set(data.listed) : null, rooms = (data && data.rooms) || {};
+    const keep = (id, op) => listed ? listed.has(id) : op === "cn" || op === "sp";
+    const before = PLACES.length;
+    for (let i = STAYS.length - 1; i >= 0; i--) if (!keep(STAYS[i].id, STAYS[i].k)) STAYS.splice(i, 1);
+    for (let i = PLACES.length - 1; i >= 0; i--) if (!keep(PLACES[i].id, PLACES[i].op)) PLACES.splice(i, 1);
+    STAYS.forEach(st => { st.rooms = rooms[st.id] || []; });
+    window.STAY_ROOMS = rooms;
+    window.STAYS_READY = true;
+    // Views drawn before the list arrived may show hidden trail packages; draw the current view again.
+    if (PLACES.length !== before && typeof nav === "function") { const v = (location.hash.slice(1) || "home").split("-")[0]; if (v !== "map") nav(); }
+  }
 
   function init() {
   // Dots and filters follow the booking type (Instant booking or Easy enquire), not the operator.
@@ -118,6 +138,7 @@
         ${s.hike ? `<dt>Nearby hiking</dt><dd>${esc(s.hike)}</dd>` : ""}
         ${s.book ? `<dt>Book by</dt><dd>${esc(s.book)}</dd>` : ""}
         ${s.notes ? `<dt>Notes</dt><dd>${esc(s.notes)}</dd>` : ""}
+        ${s.rooms && s.rooms.length ? `<dt>Rooms</dt><dd>${s.rooms.map(r => esc(r.name) + (r.sleeps ? ` <span class="muted">(sleeps ${r.sleeps})</span>` : "")).join("<br>")}</dd>` : ""}
       </dl>
       <div class="contact">${contact || `<span class="none">No contact details on file yet.</span>`}
         <a href="${dir}" target="_blank" rel="noopener">${ICON.dir}<span>Directions</span><small>${s.gps ? "GPS position ↗" : "Approx. area ↗"}</small></a></div>

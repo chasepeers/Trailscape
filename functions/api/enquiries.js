@@ -2,13 +2,13 @@
 // Body (sent by booking.js): { stayId, stayName, operator, checkIn, checkOut, nights, hikers, guest: { name, phone, email },
 //   notes, flexibleDates, guidePrice: { stayFees, serviceFee, total, currency } }
 // → { ref: "HS-1100", status: "enquiry" }
-import { json, readJson, getStay, cleanTrip, upsertGuest, nextRef, event, todaySA, addDays, daysBetween, bad, HttpError,
+import { json, readJson, getListedStay, cleanTrip, upsertGuest, nextRef, event, todaySA, addDays, daysBetween, bad, HttpError,
   sendEmail, notifyTo, rand, longDate } from "../../lib/api.js";
 import { askOperator } from "../../lib/operator.js";
 
 export async function onRequestPost({ request, env, waitUntil }) {
   const db = env.DB, body = await readJson(request);
-  const stay = await getStay(db, String(body.stayId || ""));
+  const stay = await getListedStay(db, String(body.stayId || ""));
   if (stay.mode === "instant") throw new HttpError(409, "This stay takes instant bookings; use /api/bookings");
   const t = cleanTrip(body, stay);
   if (t.checkIn < addDays(todaySA(), 1)) throw bad("Pick a start date from tomorrow onwards");

@@ -40,6 +40,20 @@
   .msg pre { white-space: pre-wrap; font: inherit; margin: 6px 0 0; max-height: 220px; overflow: auto; } .btnrow { display: flex; gap: 6px; flex-wrap: wrap; }
   #login { max-width: 360px; margin: 12vh auto; display: grid; gap: 12px; padding: 0 20px; }
   .toast { position: fixed; bottom: 18px; left: 50%; transform: translateX(-50%); background: var(--fg); color: #fff; padding: 9px 16px; border-radius: 999px; font-size: .9rem; z-index: 9; }
+  .sw { position: relative; display: inline-block; width: 38px; height: 22px; flex: none; }
+  .sw input { opacity: 0; width: 0; height: 0; position: absolute; }
+  .sw span { position: absolute; inset: 0; border-radius: 999px; background: #d5d7db; transition: background .15s; cursor: pointer; }
+  .sw span::after { content: ""; position: absolute; left: 3px; top: 3px; width: 16px; height: 16px; border-radius: 50%; background: #fff; transition: transform .15s; box-shadow: 0 1px 2px rgba(0,0,0,.2); }
+  .sw input:checked + span { background: var(--ok); } .sw input:checked + span::after { transform: translateX(16px); }
+  .sw input:focus-visible + span { outline: 2px solid var(--info); outline-offset: 2px; }
+  .filters { display: flex; gap: 6px; flex-wrap: wrap; align-items: center; margin-bottom: 10px; } .filters input { max-width: 260px; }
+  .consentrow { display: flex; align-items: center; gap: 10px; } .consentrow b { font-weight: 600; }
+  .room { background: #fff; border: 1px solid var(--line); border-radius: 8px; padding: 10px 12px; display: grid; gap: 6px; }
+  .room h4 { margin: 0; font-size: .95rem; font-weight: 600; display: flex; justify-content: space-between; gap: 8px; }
+  .rates { width: 100%; font-size: .84rem; } .rates td { padding: 4px 6px; border-bottom: 1px solid var(--band); } .rates td.r { text-align: right; }
+  .link { background: none; padding: 0; color: var(--info); border-radius: 0; font-size: .82rem; } .link.bad { color: var(--bad); }
+  .grid3 { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 8px; }
+  .missing { color: var(--warn); }
   @media (max-width: 860px) { main { grid-template-columns: 1fr; } #list { border-right: 0; border-bottom: 1px solid var(--line); } .kpis { grid-template-columns: repeat(2, 1fr); } }
 </style>
 </head>
@@ -81,11 +95,13 @@ function signedOut() {
 function shell() {
   $("#app").innerHTML = `<header><b>Trailscape back office</b><nav>
       <button data-show="open" aria-pressed="true">Needs action</button><button data-show="all" aria-pressed="false">Everything</button>
-      <button id="nblock">Block nights</button><button id="nstay">Stays &amp; prices</button><button id="nunm">Unmatched replies</button><a class="btn" href="/" style="text-decoration:none">Site</a><button id="out">Sign out</button></nav></header>
+      <button id="nblock">Block nights</button><button id="nven">Venues &amp; rooms</button><button id="nstay">Stays &amp; prices</button><button id="nunm">Unmatched replies</button><a class="btn" href="/" style="text-decoration:none">Site</a><button id="out">Sign out</button></nav></header>
     <main><section id="list"></section><aside id="side"><p class="muted">Pick an enquiry or booking.</p></aside></main>`;
-  document.querySelectorAll("[data-show]").forEach(b => b.onclick = () => { show = b.dataset.show; document.querySelectorAll("[data-show]").forEach(x => x.setAttribute("aria-pressed", x === b)); queue(); });
-  $("#out").onclick = logout; $("#nblock").onclick = blockForm; $("#nstay").onclick = staysForm; $("#nunm").onclick = unmatched;
-  queue(); if (sel) detail(sel);
+  document.querySelectorAll("[data-show]").forEach(b => b.onclick = () => { show = b.dataset.show; inVenues = false; if (location.hash.startsWith("#venue")) history.replaceState(null, "", location.pathname); document.querySelectorAll("[data-show]").forEach(x => x.setAttribute("aria-pressed", x === b)); queue(); });
+  $("#out").onclick = logout; $("#nblock").onclick = blockForm; $("#nstay").onclick = staysForm; $("#nven").onclick = () => venues(); $("#nunm").onclick = unmatched;
+  if (location.hash.startsWith("#venue-")) { venues(); venue(decodeURIComponent(location.hash.slice(7))); }
+  else if (location.hash === "#venues") venues();
+  else { queue(); if (sel) detail(sel); }
 }
 
 async function queue() {
@@ -242,8 +258,195 @@ function editStay(s) {
   };
 }
 
+// ---------- Venues & rooms: every stay with its contact email, consent (= shown on the site), rooms and rates ----------
+let inVenues = false, vf = { q: "", consent: "", email: false, rooms: false }, curVenue = null;
+const BASIS = { unit: "per unit", person: "per person" };
+const shortDay = s => s ? new Date(s + "T00:00:00Z").toLocaleDateString("en-ZA", { timeZone: "UTC", day: "numeric", month: "short", year: "2-digit" }) : "";
+const sw = (id, on, label) => `<label class="sw" title="${on ? "Shown on the site" : "Hidden from the site"}" onclick="event.stopPropagation()"><input type="checkbox" data-consent="${esc(id)}" ${on ? "checked" : ""} aria-label="${esc(label)}"><span></span></label>`;
+
+async function setConsent(id, on, input) {
+  try {
+    await api("/stays/" + encodeURIComponent(id), { method: "PATCH", body: JSON.stringify({ consent: on }) });
+    toast(on ? "Consent recorded · shown on the map" : "Hidden from the map · record kept");
+    if (inVenues) drawVenues(); if (curVenue === id) venue(id);
+  } catch (err) { if (input) input.checked = !on; toast(err.message); }
+}
+function bindConsent(root) {
+  root.querySelectorAll("input[data-consent]").forEach(i => i.onchange = () => setConsent(i.dataset.consent, i.checked, i));
+}
+
+function venues() {
+  inVenues = true; sel = null;
+  if (!location.hash.startsWith("#venue-")) history.replaceState(null, "", "#venues");
+  document.querySelectorAll("[data-show]").forEach(x => x.setAttribute("aria-pressed", "false"));
+  $("#list").innerHTML = `<div class="kpis" id="v-kpis"></div>
+    <div class="filters"><input id="v-q" placeholder="Search name, ID, operator or type" value="${esc(vf.q)}">
+      <select id="v-c" style="width:auto"><option value="">All venues</option><option value="yes" ${vf.consent === "yes" ? "selected" : ""}>Shown (consent yes)</option><option value="no" ${vf.consent === "no" ? "selected" : ""}>Hidden (consent no)</option></select>
+      <button id="v-em" aria-pressed="${vf.email}">No email</button><button id="v-rm" aria-pressed="${vf.rooms}">No rooms yet</button></div>
+    <div class="filters"><a class="btn" href="${API}/rooms-csv" style="text-decoration:none">Download rooms &amp; rates (CSV)</a>
+      <a class="btn" href="${API}/rooms-csv?all=1" style="text-decoration:none" title="Includes every venue, also hidden ones without rooms, so you can fill them in">Download blank sheet for all venues</a>
+      <label class="btn" style="display:inline-block;color:var(--fg);font-size:inherit">Upload CSV<input type="file" id="v-up" accept=".csv,text/csv" hidden></label></div>
+    <div id="v-tab"><p class="muted">Loading…</p></div>`;
+  let t; $("#v-q").oninput = () => { clearTimeout(t); t = setTimeout(() => { vf.q = $("#v-q").value.trim(); drawVenues(); }, 250); };
+  $("#v-c").onchange = () => { vf.consent = $("#v-c").value; drawVenues(); };
+  $("#v-em").onclick = () => { vf.email = !vf.email; $("#v-em").setAttribute("aria-pressed", vf.email); drawVenues(); };
+  $("#v-rm").onclick = () => { vf.rooms = !vf.rooms; $("#v-rm").setAttribute("aria-pressed", vf.rooms); drawVenues(); };
+  $("#v-up").onchange = e => { const f = e.target.files[0]; e.target.value = ""; if (f) importCsv(f); };
+  if (!curVenue) $("#side").innerHTML = `<div class="card"><h3>Venues &amp; rooms</h3><p class="muted" style="margin:0;font-size:.88rem">The switch is the provider's consent. On: the venue shows on the map and takes enquiries. Off: the record stays here but is hidden from the site. Pick a venue to edit its contact email, rooms and rates.</p></div>`;
+  drawVenues();
+}
+async function drawVenues() {
+  const el = $("#v-tab"); if (!el) return;
+  const qs = new URLSearchParams({ q: vf.q, ...(vf.consent ? { consent: vf.consent } : {}), ...(vf.email ? { email: "missing" } : {}), ...(vf.rooms ? { rooms: "missing" } : {}) });
+  try {
+    const { counts: c, items } = await api("/venues?" + qs);
+    $("#v-kpis").innerHTML = `<div class="kpi"><small>Venues</small><b>${c.total}</b></div><div class="kpi"><small>Shown on map</small><b>${c.consented || 0}</b></div>
+      <div class="kpi"><small>No email on file</small><b>${c.no_email || 0}</b></div><div class="kpi"><small>No rooms yet</small><b>${c.no_rooms || 0}</b></div>`;
+    el.innerHTML = items.length ? `<table><thead><tr><th>Venue</th><th>Booking email</th><th class="r">Rooms</th><th class="r">From</th><th>Consent</th></tr></thead><tbody>
+      ${items.map(v => `<tr data-v="${esc(v.id)}" class="${v.id === curVenue ? "on" : ""}" style="cursor:pointer">
+        <td>${esc(v.name)}<small class="mono">${esc(v.id)} · ${esc(v.operator)}</small></td>
+        <td>${v.booking_email ? esc(v.booking_email) : `<span class="missing">Add email</span>`}${v.contact_name ? `<small>${esc(v.contact_name)}</small>` : ""}</td>
+        <td class="r">${v.rooms || `<span class="muted">–</span>`}${v.rooms ? `<small>${v.rates} rate${v.rates === 1 ? "" : "s"}</small>` : ""}</td>
+        <td class="r">${v.from_rate ? R(v.from_rate) : `<span class="muted">–</span>`}</td>
+        <td><div class="consentrow">${sw(v.id, v.consent, "Consent for " + v.name)}<span class="tag ${v.consent ? "ok" : ""}">${v.consent ? "Shown" : "Hidden"}</span></div></td></tr>`).join("")}</tbody></table>
+      ${items.length >= 400 ? `<p class="muted">Showing the first 400. Search to narrow the list.</p>` : ""}`
+      : `<p class="muted">No venues match.</p>`;
+    el.querySelectorAll("tr[data-v]").forEach(tr => tr.onclick = () => venue(tr.dataset.v));
+    bindConsent(el);
+  } catch (err) { el.innerHTML = `<p class="err">${esc(err.message)}</p>`; }
+}
+
+async function venue(id) {
+  curVenue = id; history.replaceState(null, "", "#venue-" + encodeURIComponent(id));
+  document.querySelectorAll("tr[data-v]").forEach(tr => tr.classList.toggle("on", tr.dataset.v === id));
+  const side = $("#side"); side.innerHTML = `<p class="muted">Loading…</p>`;
+  let v; try { v = await api("/venues/" + encodeURIComponent(id)); } catch (err) { side.innerHTML = `<p class="err">${esc(err.message)}</p>`; return; }
+  const rooms = v.roomList.filter(m => m.active), archived = v.roomList.filter(m => !m.active);
+  side.innerHTML = `
+    <div><span class="mono muted">${esc(v.id)} · ${esc(v.operator)} · ${v.mode === "instant" ? "Instant booking" : "Easy enquire"}</span><h2>${esc(v.name)}</h2><div class="muted">${esc(v.kind || "")}</div></div>
+    <div class="card"><div class="consentrow">${sw(v.id, v.consent, "Consent for " + v.name)}<b>${v.consent ? "Consent received · shown on the map" : "No consent yet · hidden from the site"}</b></div>
+      <span class="muted" style="font-size:.82rem">${v.consent && v.consent_at ? "Switched on " + when(v.consent_at) + ". " : ""}Off keeps everything here but removes the venue from the map and stay pages, and stops new enquiries.</span></div>
+    <form class="card" id="vc"><h3>Contact</h3>
+      <div class="grid2"><label>Booking email${v.booking_email ? "" : ` <span class="missing">· none on file</span>`}<input id="vc-email" type="email" value="${esc(v.booking_email || "")}" placeholder="bookings@example.co.za"></label>
+        <label>Contact person<input id="vc-name" value="${esc(v.contact_name || "")}" placeholder="optional"></label></div>
+      <div class="grid2"><label>Phone<input id="vc-phone" value="${esc(v.booking_phone || "")}"></label>
+        <label>Rate sheet link (PDF or page)<input id="vc-rates" type="url" value="${esc(v.rates_url || "")}" placeholder="https://…"></label></div>
+      <label>Consent note<input id="vc-note" value="${esc(v.consent_note || "")}" placeholder="e.g. Owner replied yes by email, 12 Nov"></label>
+      <div class="btnrow"><button class="primary">Save contact</button>${v.rates_url ? `<a class="btn" href="${esc(v.rates_url)}" target="_blank" rel="noopener" style="text-decoration:none">Open rate sheet ↗</a>` : ""}</div><p class="err" id="vc-err"></p></form>
+    <div class="card"><div class="row2"><h3>Rooms &amp; rates</h3><span class="muted" style="font-size:.82rem">${v.rates_checked_at ? "Last updated " + when(v.rates_checked_at) : "Nothing entered yet"}</span></div>
+      ${rooms.length ? rooms.map(roomHTML).join("") : `<p class="muted" style="margin:0;font-size:.88rem">No room types yet. Add each room, unit, hut or campsite type with its nightly rates.</p>`}
+      <div id="room-new"></div>
+      <div class="btnrow"><button id="r-add" class="primary">Add room type</button>${rooms.length ? `<button id="r-ok" title="Use when the provider confirms nothing has changed">Mark rates confirmed</button>` : ""}</div>
+      ${archived.length ? `<details><summary class="muted" style="font-size:.85rem;cursor:pointer">${archived.length} hidden room type${archived.length === 1 ? "" : "s"}</summary>${archived.map(roomHTML).join("")}</details>` : ""}</div>
+    <div class="btnrow"><button id="v-back">Back to the list</button></div>`;
+  bindConsent(side);
+  $("#v-back").onclick = () => { curVenue = null; history.replaceState(null, "", "#venues"); venues(); };
+  $("#vc").onsubmit = async e => {
+    e.preventDefault();
+    const body = { bookingEmail: $("#vc-email").value.trim(), contactName: $("#vc-name").value.trim(), bookingPhone: $("#vc-phone").value.trim(), ratesUrl: $("#vc-rates").value.trim(), consentNote: $("#vc-note").value.trim() };
+    try { await api("/stays/" + encodeURIComponent(v.id), { method: "PATCH", body: JSON.stringify(body) }); toast("Contact saved"); drawVenues(); venue(v.id); }
+    catch (err) { $("#vc-err").textContent = err.message; }
+  };
+  $("#r-add").onclick = () => { $("#room-new").innerHTML = roomForm(null); bindRoomForm(v, null); $("#r-add").hidden = true; };
+  if ($("#r-ok")) $("#r-ok").onclick = async () => { try { await api("/stays/" + encodeURIComponent(v.id), { method: "PATCH", body: JSON.stringify({ ratesChecked: true }) }); toast("Rates marked as confirmed today"); venue(v.id); } catch (err) { toast(err.message); } };
+  side.querySelectorAll("[data-act]").forEach(b => b.onclick = e => { e.preventDefault(); roomAction(v, b.dataset.act, +b.dataset.room, +b.dataset.rate || null); });
+}
+
+function roomHTML(m) {
+  const meta = [m.sleeps ? "Sleeps " + m.sleeps : "", m.bed_setup, m.units > 1 ? m.units + " units" : ""].filter(Boolean).map(esc).join(" · ");
+  return `<div class="room" id="room-${m.id}"><h4><span>${esc(m.name)}${m.active ? "" : ` <span class="tag">hidden</span>`}</span>
+      <span class="btnrow"><button class="link" data-act="edit" data-room="${m.id}">Edit</button><button class="link" data-act="addrate" data-room="${m.id}">Add rate</button><button class="link bad" data-act="del" data-room="${m.id}">Delete</button></span></h4>
+    ${meta ? `<div class="muted" style="font-size:.84rem">${meta}</div>` : ""}${m.included ? `<div style="font-size:.84rem">Includes: ${esc(m.included)}</div>` : ""}
+    ${m.rates.length ? `<table class="rates"><tbody>${m.rates.map(r => `<tr><td>${esc(r.label)}${r.valid_from || r.valid_to ? `<small class="muted" style="display:block">${shortDay(r.valid_from) || "…"} – ${shortDay(r.valid_to) || "…"}</small>` : ""}</td>
+      <td class="r"><b>${R(r.amount)}</b><small class="muted" style="display:block">${BASIS[r.basis]} / night</small></td>
+      <td style="font-size:.78rem" class="muted">${[r.min_nights ? "min " + r.min_nights + " nights" : "", r.extra_person ? "+" + R(r.extra_person) + " extra person" : "", esc(r.notes || "")].filter(Boolean).join("<br>")}</td>
+      <td class="r"><button class="link" data-act="editrate" data-room="${m.id}" data-rate="${r.id}">Edit</button> <button class="link bad" data-act="delrate" data-room="${m.id}" data-rate="${r.id}">×</button></td></tr>`).join("")}</tbody></table>`
+      : `<div class="missing" style="font-size:.84rem">No rate yet</div>`}
+    <div data-slot="${m.id}"></div></div>`;
+}
+function roomForm(m) {
+  m = m || {};
+  return `<form class="room" data-roomform><h4>${m.id ? "Edit room type" : "New room type"}</h4>
+    <label>Name<input name="name" required value="${esc(m.name || "")}" placeholder="e.g. Hut 1, Double en-suite, Campsite (6 people)"></label>
+    <div class="grid3"><label>Sleeps<input name="sleeps" type="number" min="1" value="${m.sleeps ?? ""}"></label><label>How many units<input name="units" type="number" min="1" value="${m.units ?? 1}"></label>
+      <label>Shown<select name="active"><option value="1">Yes</option><option value="0" ${m.active === 0 ? "selected" : ""}>Hidden</option></select></label></div>
+    <label>Bed setup<input name="bedSetup" value="${esc(m.bed_setup || "")}" placeholder="e.g. 1 double + 2 single bunks"></label>
+    <label>Included<input name="included" value="${esc(m.included || "")}" placeholder="e.g. Linen, towels, firewood · self-catering"></label>
+    <label>Internal notes<input name="notes" value="${esc(m.notes || "")}"></label>
+    ${m.id ? "" : `<span class="muted" style="font-size:.8rem">Starting rate (more rates can be added after saving)</span>${rateFields({})}`}
+    <div class="btnrow"><button class="primary">Save</button><button type="button" data-cancel>Cancel</button></div><p class="err"></p></form>`;
+}
+const rateFields = r => `<div class="grid3"><label>Label<input name="label" value="${esc(r.label || "Standard")}" placeholder="Standard, Peak, Weekend"></label>
+    <label>Rate (R per night)<input name="amount" type="number" min="1" value="${r.amount ?? ""}"></label>
+    <label>Charged<select name="basis"><option value="unit">per unit</option><option value="person" ${r.basis === "person" ? "selected" : ""}>per person</option></select></label></div>
+  <div class="grid2"><label>Valid from<input name="validFrom" type="date" value="${r.valid_from || ""}"></label><label>Valid to (last night)<input name="validTo" type="date" value="${r.valid_to || ""}"></label></div>
+  <div class="grid3"><label>Min nights<input name="minNights" type="number" min="1" value="${r.min_nights ?? ""}"></label><label>Extra person (R)<input name="extraPerson" type="number" min="0" value="${r.extra_person ?? ""}"></label>
+    <label>Rate notes<input name="rnotes" value="${esc(r.notes || "")}"></label></div>`;
+const formVals = f => Object.fromEntries([...new FormData(f)].map(([k, v]) => [k, String(v).trim()]));
+const rateBody = o => ({ label: o.label, amount: o.amount, basis: o.basis, validFrom: o.validFrom || null, validTo: o.validTo || null, minNights: o.minNights || null, extraPerson: o.extraPerson || null, notes: o.rnotes || null });
+
+function bindRoomForm(v, m) {
+  const f = (m ? $(`#room-${m.id}`) : $("#room-new")).querySelector("[data-roomform]");
+  f.querySelector("[data-cancel]").onclick = () => venue(v.id);
+  f.onsubmit = async e => {
+    e.preventDefault();
+    const o = formVals(f), room = { name: o.name, sleeps: o.sleeps || null, units: o.units || 1, bedSetup: o.bedSetup, included: o.included, notes: o.notes, active: o.active === "1" };
+    try {
+      if (m) await api("/rooms/" + m.id, { method: "PATCH", body: JSON.stringify(room) });
+      else await api("/venues/" + encodeURIComponent(v.id) + "/rooms", { method: "POST", body: JSON.stringify({ ...room, rates: o.amount ? [rateBody(o)] : [] }) });
+      toast("Room saved"); drawVenues(); venue(v.id);
+    } catch (err) { f.querySelector(".err").textContent = err.message; }
+  };
+}
+async function roomAction(v, act, roomId, rateId) {
+  const m = v.roomList.find(x => x.id === roomId), box = document.querySelector(`#room-${roomId} [data-slot]`);
+  if (act === "edit") { $(`#room-${roomId}`).innerHTML = roomForm(m); bindRoomForm(v, m); return; }
+  if (act === "del") {
+    if (!confirm(`Delete "${m.name}" and its ${m.rates.length} rate(s)? To keep it on record but off the site, edit it and set Shown to Hidden instead.`)) return;
+    try { await api("/rooms/" + roomId, { method: "DELETE" }); toast("Room deleted"); drawVenues(); venue(v.id); } catch (err) { toast(err.message); } return;
+  }
+  if (act === "delrate") {
+    if (!confirm("Delete this rate?")) return;
+    try { await api("/rates/" + rateId, { method: "DELETE" }); toast("Rate deleted"); drawVenues(); venue(v.id); } catch (err) { toast(err.message); } return;
+  }
+  const r = act === "editrate" ? m.rates.find(x => x.id === rateId) : {};
+  box.innerHTML = `<form style="display:grid;gap:8px;border-top:1px solid var(--line);padding-top:8px"><b style="font-size:.88rem">${rateId ? "Edit rate" : "New rate for " + esc(m.name)}</b>${rateFields(r)}
+    <div class="btnrow"><button class="primary">Save rate</button><button type="button" data-cancel>Cancel</button></div><p class="err"></p></form>`;
+  const f = box.querySelector("form");
+  f.querySelector("[data-cancel]").onclick = () => { box.innerHTML = ""; };
+  f.onsubmit = async e => {
+    e.preventDefault();
+    try {
+      const body = JSON.stringify(rateBody(formVals(f)));
+      if (rateId) await api("/rates/" + rateId, { method: "PATCH", body }); else await api("/rooms/" + roomId + "/rates", { method: "POST", body });
+      toast("Rate saved"); drawVenues(); venue(v.id);
+    } catch (err) { f.querySelector(".err").textContent = err.message; }
+  };
+}
+
+async function importCsv(file) {
+  const csv = await file.text(), side = $("#side");
+  curVenue = null;
+  side.innerHTML = `<p class="muted">Checking ${esc(file.name)}…</p>`;
+  const summary = r => `<div class="row2"><span>Venues touched</span><span>${r.stays}</span></div><div class="row2"><span>New room types</span><span>${r.roomsNew}</span></div>
+    <div class="row2"><span>Room types updated</span><span>${r.roomsUpdated}</span></div><div class="row2"><span>New rates</span><span>${r.ratesNew}</span></div><div class="row2"><span>Rates updated</span><span>${r.ratesUpdated}</span></div>`;
+  try {
+    const r = await api("/rooms-import", { method: "POST", body: JSON.stringify({ csv }) });
+    if (r.errors.length) { side.innerHTML = `<div class="card"><h3>Fix these lines first</h3><p class="muted" style="margin:0;font-size:.85rem">Nothing was saved.</p>${r.errors.map(x => `<div class="err">${esc(x)}</div>`).join("")}</div>`; return; }
+    side.innerHTML = `<div class="card"><h3>Ready to import ${esc(file.name)}</h3>${summary(r)}
+      <span class="muted" style="font-size:.82rem">Rows with a room_id or rate_id update that room or rate; rows without one are added. Nothing is deleted by an import.</span>
+      <div class="btnrow"><button class="primary" id="imp-go">Import</button><button id="imp-no">Cancel</button></div><p class="err" id="imp-err"></p></div>`;
+    $("#imp-no").onclick = venues;
+    $("#imp-go").onclick = async () => {
+      $("#imp-go").disabled = true;
+      try { const done = await api("/rooms-import", { method: "POST", body: JSON.stringify({ csv, apply: true }) }); side.innerHTML = `<div class="card"><h3>Imported</h3>${summary(done)}</div>`; toast("Rooms and rates imported"); drawVenues(); }
+      catch (err) { $("#imp-go").disabled = false; $("#imp-err").textContent = err.message; }
+    };
+  } catch (err) { side.innerHTML = `<p class="err">${esc(err.message)}</p>`; }
+}
+
 let isAdmin = false;
-window.addEventListener("hashchange", () => { const r = location.hash.slice(1); if (isAdmin && r && r !== sel) detail(r); });
+window.addEventListener("hashchange", () => { const r = location.hash.slice(1); if (isAdmin && r && r !== sel && !r.startsWith("venue")) detail(r); });
 fetch("/api/auth/me", { credentials: "same-origin" }).then(r => r.json()).then(d => { isAdmin = !!(d.user && d.user.admin); isAdmin ? shell() : signedOut(); }).catch(signedOut);
 </script>
 </body>
