@@ -43,7 +43,7 @@ export async function onRequest(ctx) {
   try { return await handle(ctx); }
   catch (err) {
     // Until migration 0006 is applied, the Outreach view says so instead of showing a raw database error.
-    if (/no such table: outreach/.test(String(err && err.message))) throw new HttpError(503, "Outreach isn't set up in the database yet (migration 0006_outreach.sql still to be applied).");
+    if (/no such (table: outreach|column: website)/.test(String(err && err.message))) throw new HttpError(503, "This needs the database update in migrations/0006_outreach.sql, which hasn't been applied yet.");
     throw err;
   }
 }
@@ -146,7 +146,7 @@ async function handle({ request, env, params, data }) {
     if (url.searchParams.get("rooms") === "missing") where.push("NOT EXISTS (SELECT 1 FROM rooms m WHERE m.stay_id = s.id AND m.active = 1)");
     const { results } = await db.prepare(`
       SELECT s.id, s.name, s.operator, s.op_key, s.kind, s.mode, s.booking_email, s.booking_phone, s.contact_name, s.consent, s.consent_at,
-             s.rates_url, s.rates_checked_at, s.website,
+             s.rates_url, s.rates_checked_at,
              (SELECT COUNT(*) FROM rooms m WHERE m.stay_id = s.id AND m.active = 1) AS rooms,
              (SELECT COUNT(*) FROM room_rates r JOIN rooms m ON m.id = r.room_id WHERE m.stay_id = s.id AND m.active = 1) AS rates,
              (SELECT MIN(r.amount) FROM room_rates r JOIN rooms m ON m.id = r.room_id WHERE m.stay_id = s.id AND m.active = 1) AS from_rate
@@ -238,8 +238,10 @@ async function handle({ request, env, params, data }) {
     return json({ counts, items: results });
   }
   if (what === "outreach" && id) {
-    const s = await db.prepare("SELECT id, name, operator, op_key, booking_email, booking_phone, contact_name, website, consent, consent_at, consent_note FROM stays WHERE id = ?").bind(id).first();
-    if (!s) throw new HttpError(404, "Unknown stay");
+    // SELECT * so this works before and after migration 0006 adds stays.website.
+    const full = await db.prepare("SELECT * FROM stays WHERE id = ?").bind(id).first();
+    if (!full) throw new HttpError(404, "Unknown stay");
+    const s = Object.fromEntries(["id", "name", "operator", "op_key", "booking_email", "booking_phone", "contact_name", "website", "consent", "consent_at", "consent_note"].map(k => [k, full[k] ?? null]));
     if (method === "POST") {
       const b = await readJson(request), cur = await db.prepare("SELECT * FROM outreach WHERE stay_id = ?").bind(id).first();
       const row = { status: "sent", template: null, sent_to: null, sent_from: null, sent_at: null, replied_at: null, follow_up_on: null, follow_ups: 0, note: null, ...(cur || {}) };

@@ -364,7 +364,8 @@ async function venue(id) {
   $("#v-back").onclick = () => { curVenue = null; history.replaceState(null, "", "#venues"); venues(); };
   $("#vc").onsubmit = async e => {
     e.preventDefault();
-    const body = { bookingEmail: $("#vc-email").value.trim(), contactName: $("#vc-name").value.trim(), bookingPhone: $("#vc-phone").value.trim(), ratesUrl: $("#vc-rates").value.trim(), website: $("#vc-web").value.trim(), consentNote: $("#vc-note").value.trim() };
+    const body = { bookingEmail: $("#vc-email").value.trim(), contactName: $("#vc-name").value.trim(), bookingPhone: $("#vc-phone").value.trim(), ratesUrl: $("#vc-rates").value.trim(), consentNote: $("#vc-note").value.trim() };
+    const web = $("#vc-web").value.trim(); if (web !== (v.website || "")) body.website = web;   // only sent when changed
     try { await api("/stays/" + encodeURIComponent(v.id), { method: "PATCH", body: JSON.stringify(body) }); toast("Contact saved"); drawVenues(); venue(v.id); }
     catch (err) { $("#vc-err").textContent = err.message; }
   };
