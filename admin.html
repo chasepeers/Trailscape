@@ -54,6 +54,10 @@
   .link { background: none; padding: 0; color: var(--info); border-radius: 0; font-size: .82rem; } .link.bad { color: var(--bad); }
   .grid3 { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 8px; }
   .missing { color: var(--warn); }
+  /* Grey buttons vanish on grey cards: give them a white face there. */
+  .card button:not(.primary):not(.link):not([aria-pressed="true"]), .card .btn:not(.primary) { background: #fff; box-shadow: inset 0 0 0 1px var(--line); }
+  header nav button:not([aria-pressed="true"]):hover, header nav .btn:hover { background: #e7e8ea; }
+  td.nw { white-space: nowrap; }
   @media (max-width: 860px) { main { grid-template-columns: 1fr; } #list { border-right: 0; border-bottom: 1px solid var(--line); } .kpis { grid-template-columns: repeat(2, 1fr); } }
 </style>
 </head>
@@ -92,16 +96,25 @@ function signedOut() {
     <a class="btn primary" href="/#trips" style="text-align:center;text-decoration:none">Sign in</a></div>`;
 }
 
+// Every section button in the header carries data-nav; exactly one is pressed (black) at a time.
+function setNav(key) { document.querySelectorAll("header [data-nav]").forEach(b => b.setAttribute("aria-pressed", String(b.dataset.nav === key))); }
+
 function shell() {
   $("#app").innerHTML = `<header><b>Trailscape back office</b><nav>
-      <button data-show="open" aria-pressed="true">Needs action</button><button data-show="all" aria-pressed="false">Everything</button>
-      <button id="nblock">Block nights</button><button id="nven">Venues &amp; rooms</button><button id="nstay">Stays &amp; prices</button><button id="nunm">Unmatched replies</button><a class="btn" href="/" style="text-decoration:none">Site</a><button id="out">Sign out</button></nav></header>
+      <button data-nav="open">Needs action</button><button data-nav="all">Everything</button><button data-nav="outreach">Outreach</button>
+      <button data-nav="venues">Venues &amp; rooms</button><button data-nav="stays">Stays &amp; prices</button><button data-nav="blocks">Block nights</button>
+      <button data-nav="unmatched">Unmatched replies</button><a class="btn" href="/" style="text-decoration:none">Site</a><button id="out">Sign out</button></nav></header>
     <main><section id="list"></section><aside id="side"><p class="muted">Pick an enquiry or booking.</p></aside></main>`;
-  document.querySelectorAll("[data-show]").forEach(b => b.onclick = () => { show = b.dataset.show; inVenues = false; if (location.hash.startsWith("#venue")) history.replaceState(null, "", location.pathname); document.querySelectorAll("[data-show]").forEach(x => x.setAttribute("aria-pressed", x === b)); queue(); });
-  $("#out").onclick = logout; $("#nblock").onclick = blockForm; $("#nstay").onclick = staysForm; $("#nven").onclick = () => venues(); $("#nunm").onclick = unmatched;
+  const toQueue = k => { show = k; inVenues = inOutreach = false; curVenue = curOut = null; if (/^#(venue|outreach)/.test(location.hash)) history.replaceState(null, "", location.pathname); setNav(k); queue(); };
+  const go = { open: () => toQueue("open"), all: () => toQueue("all"), outreach: () => { curOut = null; outreach(); }, venues: () => { curVenue = null; venues(); },
+    stays: () => { setNav("stays"); staysForm(); }, blocks: () => { setNav("blocks"); blockForm(); }, unmatched: () => { setNav("unmatched"); unmatched(); } };
+  document.querySelectorAll("header [data-nav]").forEach(b => b.onclick = () => go[b.dataset.nav]());
+  $("#out").onclick = logout;
   if (location.hash.startsWith("#venue-")) { venues(); venue(decodeURIComponent(location.hash.slice(7))); }
   else if (location.hash === "#venues") venues();
-  else { queue(); if (sel) detail(sel); }
+  else if (location.hash.startsWith("#outreach-")) { outreach(); outVenue(decodeURIComponent(location.hash.slice(10))); }
+  else if (location.hash === "#outreach") outreach();
+  else { setNav(show); queue(); if (sel) detail(sel); }
 }
 
 async function queue() {
@@ -123,6 +136,7 @@ async function queue() {
 
 async function detail(ref) {
   sel = ref; history.replaceState(null, "", "#" + ref);
+  if (!inVenues && !inOutreach) setNav(show);
   document.querySelectorAll("tr[data-ref]").forEach(tr => tr.classList.toggle("on", tr.dataset.ref === ref));
   const side = $("#side"); side.innerHTML = `<p class="muted">Loading ${esc(ref)}…</p>`;
   let d; try { d = await api("/requests/" + encodeURIComponent(ref)); } catch (err) { side.innerHTML = `<p class="err">${esc(err.message)}</p>`; return; }
@@ -269,6 +283,7 @@ async function setConsent(id, on, input) {
     await api("/stays/" + encodeURIComponent(id), { method: "PATCH", body: JSON.stringify({ consent: on }) });
     toast(on ? "Consent recorded · shown on the map" : "Hidden from the map · record kept");
     if (inVenues) drawVenues(); if (curVenue === id) venue(id);
+    if (inOutreach) drawOutreach(); if (curOut === id) outVenue(id);
   } catch (err) { if (input) input.checked = !on; toast(err.message); }
 }
 function bindConsent(root) {
@@ -276,9 +291,9 @@ function bindConsent(root) {
 }
 
 function venues() {
-  inVenues = true; sel = null;
+  inVenues = true; inOutreach = false; curOut = null; sel = null;
   if (!location.hash.startsWith("#venue-")) history.replaceState(null, "", "#venues");
-  document.querySelectorAll("[data-show]").forEach(x => x.setAttribute("aria-pressed", "false"));
+  setNav("venues");
   $("#list").innerHTML = `<div class="kpis" id="v-kpis"></div>
     <div class="filters"><input id="v-q" placeholder="Search name, ID, operator or type" value="${esc(vf.q)}">
       <select id="v-c" style="width:auto"><option value="">All venues</option><option value="yes" ${vf.consent === "yes" ? "selected" : ""}>Shown (consent yes)</option><option value="no" ${vf.consent === "no" ? "selected" : ""}>Hidden (consent no)</option></select>
@@ -445,8 +460,116 @@ async function importCsv(file) {
   } catch (err) { side.innerHTML = `<p class="err">${esc(err.message)}</p>`; }
 }
 
+// ---------- Outreach: who we've asked for consent, who answered, who to chase ----------
+let inOutreach = false, of = { q: "", status: "", due: false, email: false }, curOut = null;
+const OUT = { planned: ["Planned", ""], sent: ["Sent", "info"], replied: ["Replied", "warn"], yes: ["Said yes", "ok"], declined: ["Declined", "bad"], no_reply: ["No reply", "warn"], bounced: ["Bounced", "bad"] };
+const otag = s => s ? `<span class="tag ${OUT[s][1]}">${OUT[s][0]}</span>` : `<span class="tag">Not contacted</span>`;
+const today = () => new Date().toISOString().slice(0, 10);
+const plusDays = (d, n) => { const x = new Date(d + "T00:00:00Z"); x.setUTCDate(x.getUTCDate() + n); return x.toISOString().slice(0, 10); };
+const FROM_ADDR = "hello@trailscape.co.za", FOLLOW_DAYS = 7;
+
+function outreach() {
+  inOutreach = true; inVenues = false; curVenue = null; sel = null; setNav("outreach");
+  if (!location.hash.startsWith("#outreach-")) history.replaceState(null, "", "#outreach");
+  $("#list").innerHTML = `<div class="kpis" id="o-kpis"></div>
+    <div class="filters"><input id="o-q" placeholder="Search name, ID, operator or email" value="${esc(of.q)}">
+      <select id="o-s" style="width:auto"><option value="">All private &amp; community venues</option><option value="none">Not contacted</option><option value="open">Awaiting reply</option>
+        ${Object.entries(OUT).map(([k, [t]]) => `<option value="${k}">${t}</option>`).join("")}</select>
+      <button id="o-due" aria-pressed="${of.due}">Follow-up due</button><button id="o-em" aria-pressed="${of.email}">Has email</button></div>
+    <div id="o-tab"><p class="muted">Loading…</p></div>`;
+  $("#o-s").value = of.status;
+  let t; $("#o-q").oninput = () => { clearTimeout(t); t = setTimeout(() => { of.q = $("#o-q").value.trim(); drawOutreach(); }, 250); };
+  $("#o-s").onchange = () => { of.status = $("#o-s").value; drawOutreach(); };
+  $("#o-due").onclick = () => { of.due = !of.due; $("#o-due").setAttribute("aria-pressed", of.due); drawOutreach(); };
+  $("#o-em").onclick = () => { of.email = !of.email; $("#o-em").setAttribute("aria-pressed", of.email); drawOutreach(); };
+  if (!curOut) $("#side").innerHTML = `<div class="card"><h3>Outreach</h3><p class="muted" style="margin:0;font-size:.88rem">Every private, community and municipal venue, with the consent email we sent, whether they've answered and when to chase them. A follow-up date is set ${FOLLOW_DAYS} days after each email. A “yes” is recorded here; switching consent on is what puts the venue on the map. Pick a venue to update it.</p></div>`;
+  drawOutreach();
+}
+async function drawOutreach() {
+  const el = $("#o-tab"); if (!el) return;
+  const qs = new URLSearchParams({ q: of.q, ...(of.status ? { status: of.status } : {}), ...(of.due ? { due: "1" } : {}), ...(of.email ? { email: "has" } : {}) });
+  try {
+    const { counts: c, items } = await api("/outreach?" + qs);
+    $("#o-kpis").innerHTML = `<div class="kpi"><small>Contacted</small><b>${c.contacted}</b></div><div class="kpi"><small>Awaiting reply</small><b>${c.awaiting}</b></div>
+      <div class="kpi"><small>Said yes</small><b>${c.yes}</b></div><div class="kpi"><small>Follow-ups due</small><b>${c.due}</b></div>`;
+    const now = today();
+    el.innerHTML = items.length ? `<table><thead><tr><th>Venue</th><th>Booking email</th><th>Status</th><th>Sent</th><th>Follow up</th><th>Map</th></tr></thead><tbody>
+      ${items.map(v => { const due = v.follow_up_on && v.follow_up_on <= now && ["sent", "no_reply", "replied"].includes(v.status);
+        return `<tr data-o="${esc(v.id)}" class="${v.id === curOut ? "on" : ""}" style="cursor:pointer">
+        <td>${esc(v.name)}<small class="mono">${esc(v.id)} · ${esc(v.operator)}</small></td>
+        <td>${v.booking_email ? esc(v.booking_email) : `<span class="missing">No email</span>`}${v.contact_name ? `<small>${esc(v.contact_name)}</small>` : ""}</td>
+        <td>${otag(v.status)}${v.follow_ups ? `<small>${v.follow_ups} follow-up${v.follow_ups === 1 ? "" : "s"}</small>` : ""}</td>
+        <td class="nw">${v.sent_at ? shortDay(v.sent_at) : `<span class="muted">–</span>`}${v.replied_at ? `<small>replied ${shortDay(v.replied_at)}</small>` : ""}</td>
+        <td class="nw">${v.follow_up_on && ["sent", "no_reply", "replied", "planned"].includes(v.status) ? `<span class="${due ? "err" : ""}">${shortDay(v.follow_up_on)}</span>${due ? "<small>due</small>" : ""}` : `<span class="muted">–</span>`}</td>
+        <td><span class="tag ${v.consent ? "ok" : ""}">${v.consent ? "Shown" : "Hidden"}</span></td></tr>`; }).join("")}</tbody></table>
+      ${items.length >= 400 ? `<p class="muted">Showing the first 400. Search to narrow the list.</p>` : ""}`
+      : `<p class="muted">No venues match.</p>`;
+    el.querySelectorAll("tr[data-o]").forEach(tr => tr.onclick = () => outVenue(tr.dataset.o));
+  } catch (err) { el.innerHTML = `<p class="err">${esc(err.message)}</p>`; }
+}
+async function oSave(id, body, msg) {
+  try { await api("/outreach/" + encodeURIComponent(id), { method: "POST", body: JSON.stringify(body) }); toast(msg || "Saved"); drawOutreach(); outVenue(id); }
+  catch (err) { const e = $("#o-err"); if (e) e.textContent = err.message; else toast(err.message); }
+}
+async function outVenue(id) {
+  curOut = id; curVenue = null; history.replaceState(null, "", "#outreach-" + encodeURIComponent(id));
+  document.querySelectorAll("tr[data-o]").forEach(tr => tr.classList.toggle("on", tr.dataset.o === id));
+  const side = $("#side"); side.innerHTML = `<p class="muted">Loading…</p>`;
+  let v; try { v = await api("/outreach/" + encodeURIComponent(id)); } catch (err) { side.innerHTML = `<p class="err">${esc(err.message)}</p>`; return; }
+  const o = v.outreach || {}, st = o.status || null, now = today();
+  const quick = [];
+  if (!st || st === "planned") quick.push(["sent", "Mark sent today", true]);
+  if (st === "sent" || st === "no_reply") quick.push(["follow", "Follow-up sent today"], ["replied", "They replied"], ["no_reply", "No reply"]);
+  if (st === "sent" || st === "no_reply" || st === "replied") quick.push(["yes", "Said yes", st === "replied"], ["declined", "Declined"]);
+  if (st === "sent") quick.push(["bounced", "Bounced"]);
+  if (st === "yes" && !v.consent) quick.push(["consent", "Switch consent on (show on map)", true]);
+  side.innerHTML = `
+    <div><span class="mono muted">${esc(v.id)} · ${esc(v.operator)}</span><h2>${esc(v.name)}</h2><div>${otag(st)}</div></div>
+    <div class="card"><h3>Contact</h3>
+      <div>${v.booking_email ? `<a href="mailto:${esc(v.booking_email)}">${esc(v.booking_email)}</a>` : `<span class="missing">No booking email on file.</span> <button class="link" id="o-ven">Add one under Venues &amp; rooms</button>`}${v.booking_phone ? " · " + esc(v.booking_phone) : ""}</div>
+      ${v.contact_name ? `<div class="muted">${esc(v.contact_name)}</div>` : ""}
+      <div class="consentrow">${sw(v.id, v.consent, "Consent for " + v.name)}<b>${v.consent ? "Consent on · shown on the map" : "Consent off · hidden from the site"}</b></div></div>
+    ${quick.length ? `<div class="card"><h3>Quick update</h3><div class="btnrow">${quick.map(([k, t, p]) => `<button data-q="${k}" class="${p ? "primary" : ""}">${t}</button>`).join("")}</div>
+      <span class="muted" style="font-size:.8rem">Sending an email or follow-up sets the next follow-up ${FOLLOW_DAYS} days out. A reply clears it.</span></div>` : ""}
+    <form class="card" id="of"><h3>Details</h3>
+      <div class="grid2"><label>Status<select id="of-status">${Object.entries(OUT).map(([k, [t]]) => `<option value="${k}" ${k === (st || "sent") ? "selected" : ""}>${t}</option>`).join("")}</select></label>
+        <label>Email used<select id="of-tpl">${["short", "full", "other"].map(x => `<option value="${x}" ${x === (o.template || "short") ? "selected" : ""}>${x === "short" ? "Short version" : x === "full" ? "Full version" : "Other"}</option>`).join("")}</select></label></div>
+      <div class="grid2"><label>Sent to<input id="of-to" type="email" value="${esc(o.sent_to || v.booking_email || "")}"></label><label>Sent from<input id="of-from" type="email" value="${esc(o.sent_from || FROM_ADDR)}"></label></div>
+      <div class="grid3"><label>Sent on<input id="of-sent" type="date" value="${o.sent_at || ""}"></label><label>Replied on<input id="of-rep" type="date" value="${o.replied_at || ""}"></label>
+        <label>Follow up on<input id="of-fu" type="date" value="${o.follow_up_on || ""}"></label></div>
+      <label>Note<textarea id="of-note" rows="2" placeholder="e.g. Asked for rates for the cottages; sent PDF">${esc(o.note || "")}</textarea></label>
+      <label>Add to history<input id="of-log" placeholder="optional, e.g. Phoned, owner away until Friday"></label>
+      <div class="btnrow"><button class="primary">Save</button>${v.outreach ? `<button type="button" class="link bad" id="of-clear">Clear record</button>` : ""}</div><p class="err" id="o-err"></p></form>
+    <div><h3 style="margin-bottom:6px">History</h3>${v.log.length ? `<div class="log">${v.log.map(l => `<div><time>${when(l.at)}</time><span>${esc(l.text)}</span></div>`).join("")}</div>` : `<p class="muted" style="margin:0">Nothing yet.</p>`}</div>
+    <div class="btnrow"><button id="o-back">Back to the list</button></div>`;
+  bindConsent(side);
+  if ($("#o-ven")) $("#o-ven").onclick = () => { venues(); venue(v.id); };
+  $("#o-back").onclick = () => { curOut = null; history.replaceState(null, "", "#outreach"); outreach(); };
+  side.querySelectorAll("button[data-q]").forEach(b => b.onclick = () => {
+    const k = b.dataset.q;
+    if (k === "sent") return oSave(v.id, { status: "sent", template: o.template || "short", sentTo: o.sent_to || v.booking_email || null, sentFrom: o.sent_from || FROM_ADDR,
+      sentAt: now, followUpOn: plusDays(now, FOLLOW_DAYS), logNote: `Sent ${o.template || "short"} outreach email${v.booking_email ? " to " + v.booking_email : ""}` }, "Marked as sent");
+    if (k === "follow") return oSave(v.id, { status: "sent", followUpSent: true, followUpOn: plusDays(now, FOLLOW_DAYS) }, "Follow-up recorded");
+    if (k === "replied") return oSave(v.id, { status: "replied", repliedAt: o.replied_at || now, followUpOn: null }, "Reply recorded");
+    if (k === "no_reply") return oSave(v.id, { status: "no_reply" }, "Marked as no reply");
+    if (k === "yes") return oSave(v.id, { status: "yes", repliedAt: o.replied_at || now, followUpOn: null }, "Recorded: said yes");
+    if (k === "declined") return oSave(v.id, { status: "declined", repliedAt: o.replied_at || now, followUpOn: null }, "Recorded: declined");
+    if (k === "bounced") return oSave(v.id, { status: "bounced", followUpOn: null, logNote: "Email bounced: check the address" }, "Marked as bounced");
+    if (k === "consent") return oSave(v.id, { consent: true, consentNote: `Owner said yes to outreach email${o.replied_at ? ", " + shortDay(o.replied_at) : ""}` }, "Consent on · shown on the map");
+  });
+  if ($("#of-clear")) $("#of-clear").onclick = async () => {
+    if (!confirm("Clear this outreach record? The venue goes back to “not contacted”; its history is kept.")) return;
+    try { await api("/outreach/" + encodeURIComponent(v.id), { method: "DELETE" }); toast("Record cleared"); drawOutreach(); outVenue(v.id); } catch (err) { $("#o-err").textContent = err.message; }
+  };
+  $("#of").onsubmit = e => {
+    e.preventDefault();
+    oSave(v.id, { status: $("#of-status").value, template: $("#of-tpl").value, sentTo: $("#of-to").value.trim(), sentFrom: $("#of-from").value.trim(),
+      sentAt: $("#of-sent").value || null, repliedAt: $("#of-rep").value || null, followUpOn: $("#of-fu").value || null, note: $("#of-note").value.trim(), logNote: $("#of-log").value.trim() || undefined });
+  };
+}
+
 let isAdmin = false;
-window.addEventListener("hashchange", () => { const r = location.hash.slice(1); if (isAdmin && r && r !== sel && !r.startsWith("venue")) detail(r); });
+window.addEventListener("hashchange", () => { const r = location.hash.slice(1); if (isAdmin && r && r !== sel && !/^(venue|outreach)/.test(r)) detail(r); });
 fetch("/api/auth/me", { credentials: "same-origin" }).then(r => r.json()).then(d => { isAdmin = !!(d.user && d.user.admin); isAdmin ? shell() : signedOut(); }).catch(signedOut);
 </script>
 </body>

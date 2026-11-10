@@ -23,6 +23,11 @@
 //            validFrom?, validTo?, minNights?, extraPerson?, notes? }   PATCH / DELETE /api/admin/rates/34
 //   GET    /api/admin/rooms-csv                     every room and rate as a spreadsheet (one line per rate)
 //   POST   /api/admin/rooms-import                  { csv, apply? }  checks the file (apply false) or saves it; never deletes
+//   GET    /api/admin/outreach?q=&status=none|open|<status>&due=1&email=has&parks=1   venues with their outreach state
+//   GET    /api/admin/outreach/WC-058               one venue's outreach record and history
+//   POST   /api/admin/outreach/WC-058               { status?, template?, sentTo?, sentFrom?, sentAt?, repliedAt?, followUpOn?, note?,
+//            followUpSent?, logNote?, consent?, consentNote? }  creates or updates the record; consent true also switches consent on
+//   DELETE /api/admin/outreach/WC-058               back to "not contacted" (history kept)
 import { json, readJson, bad, HttpError, getStay, isDate, addDays, daysBetween, nightsOf, event, dateRange, FEE_PP, rand } from "../../../lib/api.js";
 import { askOperator, recordAnswer, answerUrl, replyAddress } from "../../../lib/operator.js";
 import { cleanRoom, cleanRate, insertSql, updateSql, touchRates, roomsOf, toCsv, parseCsv } from "../../../lib/rooms.js";
@@ -30,7 +35,9 @@ import { cleanRoom, cleanRate, insertSql, updateSql, touchRates, roomsOf, toCsv,
 const ENQ_STATUS = ["new", "asked_operator", "operator_replied", "offer_sent", "accepted", "declined", "unavailable", "cancelled"];
 const BK_STATUS = ["received", "booking_operator", "confirmed", "cancelled", "failed"];
 const PAY_STATUS = ["none", "stub", "held", "paid", "refunded", "failed"];
-const OPEN_ENQ = "('new','asked_operator','operator_replied','offer_sent')", OPEN_BK = "('received','booking_operator')";
+const OUT_STATUS = ["planned", "sent", "replied", "yes", "declined", "no_reply", "bounced"];
+const OUT_LABEL = { planned: "Planned", sent: "Sent", replied: "Replied", yes: "Said yes", declined: "Declined", no_reply: "No reply", bounced: "Bounced" };
+const OPEN_ENQ ="('new','asked_operator','operator_replied','offer_sent')", OPEN_BK = "('received','booking_operator')";
 
 export async function onRequest({ request, env, params, data }) {
   const db = env.DB, method = request.method, url = new URL(request.url);
@@ -194,6 +201,75 @@ export async function onRequest({ request, env, params, data }) {
       await db.batch([db.prepare("DELETE FROM room_rates WHERE id = ?").bind(rate.id), touchRates(db, rate.stay_id)]);
       return json({ ok: true });
     }
+  }
+
+  // ---------- Outreach: asking providers for consent to list them ----------
+  if (what === "outreach" && method === "GET" && !id) {
+    const q = "%" + (url.searchParams.get("q") || "").trim() + "%", st = url.searchParams.get("status") || "";
+    const where = ["(s.name LIKE ? OR s.id LIKE ? OR s.operator LIKE ? OR s.booking_email LIKE ?)"];
+    // CapeNature and SANParks are consented public operators; outreach is for everyone else unless asked for.
+    if (url.searchParams.get("parks") !== "1") where.push("s.op_key NOT IN ('cn', 'sp')");
+    if (st === "none") where.push("o.stay_id IS NULL");
+    else if (st === "open") where.push("o.status IN ('sent', 'no_reply')");
+    else if (OUT_STATUS.includes(st)) where.push("o.status = ?");
+    if (url.searchParams.get("due") === "1") where.push("o.follow_up_on IS NOT NULL AND o.follow_up_on <= date('now') AND o.status IN ('sent', 'no_reply', 'replied')");
+    if (url.searchParams.get("email") === "has") where.push("s.booking_email IS NOT NULL AND s.booking_email != ''");
+    const binds = [q, q, q, q, ...(OUT_STATUS.includes(st) ? [st] : [])];
+    const { results } = await db.prepare(`
+      SELECT s.id, s.name, s.operator, s.op_key, s.booking_email, s.contact_name, s.consent,
+             o.status, o.template, o.sent_to, o.sent_at, o.replied_at, o.follow_up_on, o.follow_ups, o.updated_at
+        FROM stays s LEFT JOIN outreach o ON o.stay_id = s.id WHERE ${where.join(" AND ")}
+       ORDER BY (o.follow_up_on IS NULL), o.follow_up_on, (o.stay_id IS NULL), o.updated_at DESC, s.name LIMIT 400`).bind(...binds).all();
+    const counts = await db.prepare(`SELECT COUNT(o.stay_id) AS contacted,
+        COALESCE(SUM(o.status IN ('sent', 'no_reply')), 0) AS awaiting,
+        COALESCE(SUM(o.status = 'yes'), 0) AS yes,
+        COALESCE(SUM(o.follow_up_on IS NOT NULL AND o.follow_up_on <= date('now') AND o.status IN ('sent', 'no_reply', 'replied')), 0) AS due,
+        SUM(o.stay_id IS NULL) AS not_contacted
+      FROM stays s LEFT JOIN outreach o ON o.stay_id = s.id WHERE s.op_key NOT IN ('cn', 'sp')`).first();
+    return json({ counts, items: results });
+  }
+  if (what === "outreach" && id) {
+    const s = await db.prepare("SELECT id, name, operator, op_key, booking_email, booking_phone, contact_name, consent, consent_at, consent_note FROM stays WHERE id = ?").bind(id).first();
+    if (!s) throw new HttpError(404, "Unknown stay");
+    if (method === "POST") {
+      const b = await readJson(request), cur = await db.prepare("SELECT * FROM outreach WHERE stay_id = ?").bind(id).first();
+      const row = { status: "sent", template: null, sent_to: null, sent_from: null, sent_at: null, replied_at: null, follow_up_on: null, follow_ups: 0, note: null, ...(cur || {}) };
+      const notes = [];
+      if (b.status !== undefined) {
+        if (!OUT_STATUS.includes(b.status)) throw bad("Unknown outreach status");
+        if (b.status !== row.status || !cur) notes.push(cur ? `Status: ${OUT_LABEL[row.status]} → ${OUT_LABEL[b.status]}` : `Status: ${OUT_LABEL[b.status]}`);
+        row.status = b.status;
+      }
+      for (const [k, col] of [["sentAt", "sent_at"], ["repliedAt", "replied_at"], ["followUpOn", "follow_up_on"]]) {
+        if (b[k] === undefined) continue;
+        const v = b[k] ? String(b[k]) : null;
+        if (v && !isDate(v)) throw bad(k + " must be a date (YYYY-MM-DD)");
+        row[col] = v;
+      }
+      for (const [k, col, max] of [["template", "template", 40], ["sentTo", "sent_to", 200], ["sentFrom", "sent_from", 200], ["note", "note", 1000]])
+        if (b[k] !== undefined) row[col] = b[k] ? String(b[k]).trim().slice(0, max) : null;
+      if (b.followUpSent) { row.follow_ups = (row.follow_ups || 0) + 1; notes.push(`Follow-up ${row.follow_ups} sent`); }
+      if (b.logNote) notes.push(String(b.logNote).slice(0, 1000));
+      const stmts = [db.prepare(`INSERT INTO outreach (stay_id, status, template, sent_to, sent_from, sent_at, replied_at, follow_up_on, follow_ups, note)
+          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+          ON CONFLICT(stay_id) DO UPDATE SET status = excluded.status, template = excluded.template, sent_to = excluded.sent_to, sent_from = excluded.sent_from,
+            sent_at = excluded.sent_at, replied_at = excluded.replied_at, follow_up_on = excluded.follow_up_on, follow_ups = excluded.follow_ups,
+            note = excluded.note, updated_at = strftime('%Y-%m-%dT%H:%M:%SZ', 'now')`)
+        .bind(id, row.status, row.template, row.sent_to, row.sent_from, row.sent_at, row.replied_at, row.follow_up_on, row.follow_ups, row.note),
+        ...notes.map(t => db.prepare("INSERT INTO outreach_log (stay_id, text) VALUES (?, ?)").bind(id, t))];
+      if (b.consent === true && !s.consent) {
+        stmts.push(db.prepare("UPDATE stays SET consent = 1, consent_at = ?, consent_note = COALESCE(?, consent_note), updated_at = strftime('%Y-%m-%dT%H:%M:%SZ', 'now') WHERE id = ?")
+          .bind(new Date().toISOString().slice(0, 19) + "Z", b.consentNote ? String(b.consentNote).slice(0, 300) : null, id),
+          db.prepare("INSERT INTO outreach_log (stay_id, text) VALUES (?, 'Consent switched on: shown on the map')").bind(id));
+      }
+      await db.batch(stmts);
+    } else if (method === "DELETE") {
+      await db.batch([db.prepare("DELETE FROM outreach WHERE stay_id = ?").bind(id), db.prepare("INSERT INTO outreach_log (stay_id, text) VALUES (?, 'Outreach record cleared')").bind(id)]);
+    } else if (method !== "GET") throw new HttpError(405, "Use GET, POST or DELETE");
+    const o = await db.prepare("SELECT * FROM outreach WHERE stay_id = ?").bind(id).first();
+    const { results: log } = await db.prepare("SELECT at, actor, text FROM outreach_log WHERE stay_id = ? ORDER BY id DESC LIMIT 100").bind(id).all();
+    const fresh = await db.prepare("SELECT consent, consent_at, consent_note FROM stays WHERE id = ?").bind(id).first();
+    return json({ ...s, ...fresh, outreach: o || null, log });
   }
 
   // Spreadsheet round trip: download every room and rate, edit in Excel or Google Sheets, upload again.
