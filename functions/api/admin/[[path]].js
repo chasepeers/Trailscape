@@ -15,7 +15,7 @@
 //   PUT    /api/admin/availability                  { stayId, nights: [{ date, status, bedsLeft, price? }] }  (instant stays)
 //   GET    /api/admin/stays?q=
 //   PATCH  /api/admin/stays/WC-064                  { pricePp?, beds?, mode?, engineRef?, bookingEmail?, bookingPhone?, active?,
-//            consent?, consentNote?, contactName?, ratesUrl?, ratesChecked? }   consent decides whether the stay shows on the site
+//            consent?, consentNote?, contactName?, ratesUrl?, website?, ratesChecked? }   consent decides whether the stay shows on the site
 //   GET    /api/admin/venues?q=&consent=yes|no&email=missing&rooms=missing   every stay with contact, consent and room counts
 //   GET    /api/admin/venues/WC-064                 one stay with all its rooms and rates
 //   POST   /api/admin/venues/WC-064/rooms           { name, sleeps?, bedSetup?, units?, included?, notes?, rates?: [rate] }
@@ -146,7 +146,7 @@ async function handle({ request, env, params, data }) {
     if (url.searchParams.get("rooms") === "missing") where.push("NOT EXISTS (SELECT 1 FROM rooms m WHERE m.stay_id = s.id AND m.active = 1)");
     const { results } = await db.prepare(`
       SELECT s.id, s.name, s.operator, s.op_key, s.kind, s.mode, s.booking_email, s.booking_phone, s.contact_name, s.consent, s.consent_at,
-             s.rates_url, s.rates_checked_at,
+             s.rates_url, s.rates_checked_at, s.website,
              (SELECT COUNT(*) FROM rooms m WHERE m.stay_id = s.id AND m.active = 1) AS rooms,
              (SELECT COUNT(*) FROM room_rates r JOIN rooms m ON m.id = r.room_id WHERE m.stay_id = s.id AND m.active = 1) AS rates,
              (SELECT MIN(r.amount) FROM room_rates r JOIN rooms m ON m.id = r.room_id WHERE m.stay_id = s.id AND m.active = 1) AS from_rate
@@ -238,7 +238,7 @@ async function handle({ request, env, params, data }) {
     return json({ counts, items: results });
   }
   if (what === "outreach" && id) {
-    const s = await db.prepare("SELECT id, name, operator, op_key, booking_email, booking_phone, contact_name, consent, consent_at, consent_note FROM stays WHERE id = ?").bind(id).first();
+    const s = await db.prepare("SELECT id, name, operator, op_key, booking_email, booking_phone, contact_name, website, consent, consent_at, consent_note FROM stays WHERE id = ?").bind(id).first();
     if (!s) throw new HttpError(404, "Unknown stay");
     if (method === "POST") {
       const b = await readJson(request), cur = await db.prepare("SELECT * FROM outreach WHERE stay_id = ?").bind(id).first();
@@ -367,8 +367,9 @@ async function handle({ request, env, params, data }) {
       for (const [k, col] of [["engineRef", "engine_ref"], ["bookingEmail", "booking_email"], ["bookingPhone", "booking_phone"], ["engine", "engine"]])
         if (b[k] !== undefined) put(col, b[k] ? String(b[k]).slice(0, 200) : null);
       if (b.active != null) put("active", b.active ? 1 : 0);
-      for (const [k, col, max] of [["contactName", "contact_name", 120], ["ratesUrl", "rates_url", 500], ["consentNote", "consent_note", 300]])
+      for (const [k, col, max] of [["contactName", "contact_name", 120], ["ratesUrl", "rates_url", 500], ["consentNote", "consent_note", 300], ["website", "website", 500]])
         if (b[k] !== undefined) put(col, b[k] ? String(b[k]).trim().slice(0, max) : null);
+      if (b.website && !/^https?:\/\/\S+\.\S+/i.test(String(b.website).trim())) throw bad("The website should be a full link starting with https://");
       if (b.bookingEmail && !/^[^\s@<>()",;]+@[^\s@<>()",;]+\.[a-z]{2,}$/i.test(String(b.bookingEmail).trim())) throw bad("That booking email doesn't look right");
       if (b.consent != null) { put("consent", b.consent ? 1 : 0); if (b.consent) put("consent_at", new Date().toISOString().slice(0, 19) + "Z"); }
       if (b.ratesChecked) put("rates_checked_at", new Date().toISOString().slice(0, 19) + "Z");

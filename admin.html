@@ -58,6 +58,9 @@
   .card button:not(.primary):not(.link):not([aria-pressed="true"]), .card .btn:not(.primary) { background: #fff; box-shadow: inset 0 0 0 1px var(--line); }
   header nav button:not([aria-pressed="true"]):hover, header nav .btn:hover { background: #e7e8ea; }
   td.nw { white-space: nowrap; }
+  /* The details panel stays in view while the long list on the left scrolls; it scrolls on its own when taller than the screen. */
+  #side { position: sticky; top: var(--headh, 61px); align-self: start; max-height: calc(100vh - var(--headh, 61px)); overflow-y: auto; overscroll-behavior: contain; }
+  @media (max-width: 860px) { #side { position: static; max-height: none; overflow: visible; } }
   @media (max-width: 860px) { main { grid-template-columns: 1fr; } #list { border-right: 0; border-bottom: 1px solid var(--line); } .kpis { grid-template-columns: repeat(2, 1fr); } }
 </style>
 </head>
@@ -110,6 +113,8 @@ function shell() {
     stays: () => { setNav("stays"); staysForm(); }, blocks: () => { setNav("blocks"); blockForm(); }, unmatched: () => { setNav("unmatched"); unmatched(); } };
   document.querySelectorAll("header [data-nav]").forEach(b => b.onclick = () => go[b.dataset.nav]());
   $("#out").onclick = logout;
+  const setHead = () => document.documentElement.style.setProperty("--headh", $("header").offsetHeight + "px");
+  setHead(); addEventListener("resize", setHead);
   if (location.hash.startsWith("#venue-")) { venues(); venue(decodeURIComponent(location.hash.slice(7))); }
   else if (location.hash === "#venues") venues();
   else if (location.hash.startsWith("#outreach-")) { outreach(); outVenue(decodeURIComponent(location.hash.slice(10))); }
@@ -334,7 +339,7 @@ async function drawVenues() {
 async function venue(id) {
   curVenue = id; history.replaceState(null, "", "#venue-" + encodeURIComponent(id));
   document.querySelectorAll("tr[data-v]").forEach(tr => tr.classList.toggle("on", tr.dataset.v === id));
-  const side = $("#side"); side.innerHTML = `<p class="muted">Loading…</p>`;
+  const side = $("#side"); side.innerHTML = `<p class="muted">Loading…</p>`; side.scrollTop = 0;
   let v; try { v = await api("/venues/" + encodeURIComponent(id)); } catch (err) { side.innerHTML = `<p class="err">${esc(err.message)}</p>`; return; }
   const rooms = v.roomList.filter(m => m.active), archived = v.roomList.filter(m => !m.active);
   side.innerHTML = `
@@ -346,8 +351,9 @@ async function venue(id) {
         <label>Contact person<input id="vc-name" value="${esc(v.contact_name || "")}" placeholder="optional"></label></div>
       <div class="grid2"><label>Phone<input id="vc-phone" value="${esc(v.booking_phone || "")}"></label>
         <label>Rate sheet link (PDF or page)<input id="vc-rates" type="url" value="${esc(v.rates_url || "")}" placeholder="https://…"></label></div>
-      <label>Consent note<input id="vc-note" value="${esc(v.consent_note || "")}" placeholder="e.g. Owner replied yes by email, 12 Nov"></label>
-      <div class="btnrow"><button class="primary">Save contact</button>${v.rates_url ? `<a class="btn" href="${esc(v.rates_url)}" target="_blank" rel="noopener" style="text-decoration:none">Open rate sheet ↗</a>` : ""}</div><p class="err" id="vc-err"></p></form>
+      <div class="grid2"><label>Official website<input id="vc-web" type="url" value="${esc(v.website || "")}" placeholder="https://…"></label>
+        <label>Consent note<input id="vc-note" value="${esc(v.consent_note || "")}" placeholder="e.g. Owner replied yes by email, 12 Nov"></label></div>
+      <div class="btnrow"><button class="primary">Save contact</button>${v.website ? `<a class="btn" href="${esc(v.website)}" target="_blank" rel="noopener" style="text-decoration:none">Open website ↗</a>` : ""}${v.rates_url ? `<a class="btn" href="${esc(v.rates_url)}" target="_blank" rel="noopener" style="text-decoration:none">Open rate sheet ↗</a>` : ""}</div><p class="err" id="vc-err"></p></form>
     <div class="card"><div class="row2"><h3>Rooms &amp; rates</h3><span class="muted" style="font-size:.82rem">${v.rates_checked_at ? "Last updated " + when(v.rates_checked_at) : "Nothing entered yet"}</span></div>
       ${rooms.length ? rooms.map(roomHTML).join("") : `<p class="muted" style="margin:0;font-size:.88rem">No room types yet. Add each room, unit, hut or campsite type with its nightly rates.</p>`}
       <div id="room-new"></div>
@@ -358,7 +364,7 @@ async function venue(id) {
   $("#v-back").onclick = () => { curVenue = null; history.replaceState(null, "", "#venues"); venues(); };
   $("#vc").onsubmit = async e => {
     e.preventDefault();
-    const body = { bookingEmail: $("#vc-email").value.trim(), contactName: $("#vc-name").value.trim(), bookingPhone: $("#vc-phone").value.trim(), ratesUrl: $("#vc-rates").value.trim(), consentNote: $("#vc-note").value.trim() };
+    const body = { bookingEmail: $("#vc-email").value.trim(), contactName: $("#vc-name").value.trim(), bookingPhone: $("#vc-phone").value.trim(), ratesUrl: $("#vc-rates").value.trim(), website: $("#vc-web").value.trim(), consentNote: $("#vc-note").value.trim() };
     try { await api("/stays/" + encodeURIComponent(v.id), { method: "PATCH", body: JSON.stringify(body) }); toast("Contact saved"); drawVenues(); venue(v.id); }
     catch (err) { $("#vc-err").textContent = err.message; }
   };
@@ -514,7 +520,7 @@ async function oSave(id, body, msg) {
 async function outVenue(id) {
   curOut = id; curVenue = null; history.replaceState(null, "", "#outreach-" + encodeURIComponent(id));
   document.querySelectorAll("tr[data-o]").forEach(tr => tr.classList.toggle("on", tr.dataset.o === id));
-  const side = $("#side"); side.innerHTML = `<p class="muted">Loading…</p>`;
+  const side = $("#side"); side.innerHTML = `<p class="muted">Loading…</p>`; side.scrollTop = 0;
   let v; try { v = await api("/outreach/" + encodeURIComponent(id)); } catch (err) { side.innerHTML = `<p class="err">${esc(err.message)}</p>`; return; }
   const o = v.outreach || {}, st = o.status || null, now = today();
   const quick = [];
@@ -528,6 +534,7 @@ async function outVenue(id) {
     <div class="card"><h3>Contact</h3>
       <div>${v.booking_email ? `<a href="mailto:${esc(v.booking_email)}">${esc(v.booking_email)}</a>` : `<span class="missing">No booking email on file.</span> <button class="link" id="o-ven">Add one under Venues &amp; rooms</button>`}${v.booking_phone ? " · " + esc(v.booking_phone) : ""}</div>
       ${v.contact_name ? `<div class="muted">${esc(v.contact_name)}</div>` : ""}
+      ${v.website ? `<div><a href="${esc(v.website)}" target="_blank" rel="noopener">${esc(v.website.replace(/^https?:\/\/(www\.)?/, "").replace(/\/$/, ""))} ↗</a></div>` : ""}
       <div class="consentrow">${sw(v.id, v.consent, "Consent for " + v.name)}<b>${v.consent ? "Consent on · shown on the map" : "Consent off · hidden from the site"}</b></div></div>
     ${quick.length ? `<div class="card"><h3>Quick update</h3><div class="btnrow">${quick.map(([k, t, p]) => `<button data-q="${k}" class="${p ? "primary" : ""}">${t}</button>`).join("")}</div>
       <span class="muted" style="font-size:.8rem">Sending an email or follow-up sets the next follow-up ${FOLLOW_DAYS} days out. A reply clears it.</span></div>` : ""}
