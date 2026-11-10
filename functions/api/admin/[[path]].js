@@ -28,7 +28,13 @@
 //   POST   /api/admin/outreach/WC-058               { status?, template?, sentTo?, sentFrom?, sentAt?, repliedAt?, followUpOn?, note?,
 //            followUpSent?, logNote?, consent?, consentNote? }  creates or updates the record; consent true also switches consent on
 //   DELETE /api/admin/outreach/WC-058               back to "not contacted" (history kept)
-import { json, readJson, bad, HttpError, getStay, isDate, addDays, daysBetween, nightsOf, event, dateRange, FEE_PP, rand } from "../../../lib/api.js";
+//   GET    /api/admin/outreach/WC-058/email         the outreach email as it would go out: { to, from, replyTo, subject, text, html }
+//   POST   /api/admin/outreach/WC-058/email         { to?, test?, again? } sends it through Resend from hello@ (direct links).
+//            test: true sends a copy to `to` only and just notes it in the history. Otherwise it goes to `to` (default: the
+//            venue's booking email), the venue is marked sent with a follow-up in 7 days, and a copy is bcc'd to hello@.
+//            A venue already contacted needs again: true (counted as a follow-up).
+import { json, readJson, bad, HttpError, getStay, isDate, addDays, daysBetween, nightsOf, event, dateRange, FEE_PP, rand, sendEmail, notifyTo, todaySA } from "../../../lib/api.js";
+import { outreachEmail, outreachFrom, outreachReplyTo, OUTREACH_TEMPLATE } from "../../../lib/outreach.js";
 import { askOperator, recordAnswer, answerUrl, replyAddress } from "../../../lib/operator.js";
 import { cleanRoom, cleanRate, insertSql, updateSql, touchRates, roomsOf, toCsv, parseCsv } from "../../../lib/rooms.js";
 
@@ -237,6 +243,7 @@ async function handle({ request, env, params, data }) {
       FROM stays s LEFT JOIN outreach o ON o.stay_id = s.id WHERE s.op_key NOT IN ('cn', 'sp')`).first();
     return json({ counts, items: results });
   }
+  if (what === "outreach" && id && action) return outreachEmailAction({ request, env, db, id, action, method });
   if (what === "outreach" && id) {
     // SELECT * so this works before and after migration 0006 adds stays.website.
     const full = await db.prepare("SELECT * FROM stays WHERE id = ?").bind(id).first();
@@ -452,4 +459,56 @@ async function updateRequest(db, rec, b, env) {
   stmts.push(...notes.map(n => event(db, rec.ref, "admin", n)));
   await db.batch(stmts);
   return { ...(await loadRequest(db, rec.ref, env)), ...(bookingRef ? { createdBooking: bookingRef } : {}) };
+}
+
+// ---------- Outreach email: preview and send (through Resend, so links stay direct) ----------
+const EMAIL_RE = /^[^\s@<>,;"]+@[^\s@<>,;"]+\.[a-z]{2,}$/i;
+const OUTREACH_FOLLOW_DAYS = 7;
+async function outreachEmailAction({ request, env, db, id, action, method }) {
+  if (action !== "email") throw new HttpError(404, "Unknown outreach action");
+  const v = await db.prepare("SELECT * FROM stays WHERE id = ?").bind(id).first();
+  if (!v) throw new HttpError(404, "Unknown stay");
+  const msg = outreachEmail({ venueName: v.name, contactName: v.contact_name });
+  const from = outreachFrom(env), replyTo = outreachReplyTo(env), hello = notifyTo(env);
+  if (method === "GET") return json({ to: v.booking_email || null, from, replyTo, ...msg });
+  if (method !== "POST") throw new HttpError(405, "Use GET or POST");
+
+  const b = await readJson(request);
+  const test = b.test === true;
+  const to = String(b.to || (test ? "" : v.booking_email) || "").trim().toLowerCase();
+  if (!to) throw bad(test ? "Enter an address for the test email" : "This venue has no booking email. Add one under Venues & rooms, or type an address.");
+  if (!EMAIL_RE.test(to)) throw bad(`"${to}" doesn't look like an email address`);
+  if (!env.RESEND_API_KEY) throw new HttpError(503, "Email is switched off on this deployment (RESEND_API_KEY missing)");
+
+  const cur = await db.prepare("SELECT * FROM outreach WHERE stay_id = ?").bind(id).first();
+  const contacted = cur && cur.status !== "planned";
+  if (!test && contacted && b.again !== true)
+    throw new HttpError(409, `${v.name} was already contacted${cur.sent_at ? " on " + cur.sent_at : ""} (status: ${OUT_LABEL[cur.status]}). Use “Send again” to send it as a follow-up.`);
+
+  const sent = await sendEmail(env, { to, from, replyTo, subject: msg.subject, text: msg.text, html: msg.html,
+    ...(test ? {} : { bcc: hello }), headers: { "X-Trailscape-Outreach": id } });
+  if (!sent.ok) {
+    await db.prepare("INSERT INTO outreach_log (stay_id, text) VALUES (?, ?)").bind(id, `${test ? "Test outreach email" : "Outreach email"} to ${to} failed (${sent.status || "error"})`).run();
+    // Not 502: Cloudflare replaces 502 bodies with its own page, which would hide the reason.
+    throw new HttpError(500, `Resend didn't send it (${sent.status || "error"}). ${String(sent.detail || "").slice(0, 300)}`);
+  }
+  const ref = sent.id ? ` (Resend ${sent.id})` : "";
+  if (test) {
+    await db.prepare("INSERT INTO outreach_log (stay_id, text) VALUES (?, ?)").bind(id, `Test outreach email sent to ${to}${ref}`).run();
+    return json({ ok: true, test: true, to, id: sent.id || null });
+  }
+
+  const today = todaySA(), follow = addDays(today, OUTREACH_FOLLOW_DAYS), again = !!contacted;
+  const fromAddr = (from.match(/<([^>]+)>/) || [, from])[1];
+  await db.batch([
+    db.prepare(`INSERT INTO outreach (stay_id, status, template, sent_to, sent_from, sent_at, follow_up_on, follow_ups)
+        VALUES (?, 'sent', ?, ?, ?, ?, ?, 0)
+        ON CONFLICT(stay_id) DO UPDATE SET status = 'sent', template = excluded.template, sent_to = excluded.sent_to, sent_from = excluded.sent_from,
+          sent_at = COALESCE(outreach.sent_at, excluded.sent_at), follow_up_on = excluded.follow_up_on,
+          follow_ups = outreach.follow_ups + ?, updated_at = strftime('%Y-%m-%dT%H:%M:%SZ', 'now')`)
+      .bind(id, OUTREACH_TEMPLATE, to, fromAddr, today, follow, again ? 1 : 0),
+    db.prepare("INSERT INTO outreach_log (stay_id, text) VALUES (?, ?)")
+      .bind(id, `${again ? "Outreach email sent again (follow-up)" : "Outreach email sent"} to ${to} from ${fromAddr}${ref}`),
+  ]);
+  return json({ ok: true, to, again, followUpOn: follow, id: sent.id || null });
 }
