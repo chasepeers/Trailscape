@@ -39,7 +39,16 @@ const OUT_STATUS = ["planned", "sent", "replied", "yes", "declined", "no_reply",
 const OUT_LABEL = { planned: "Planned", sent: "Sent", replied: "Replied", yes: "Said yes", declined: "Declined", no_reply: "No reply", bounced: "Bounced" };
 const OPEN_ENQ ="('new','asked_operator','operator_replied','offer_sent')", OPEN_BK = "('received','booking_operator')";
 
-export async function onRequest({ request, env, params, data }) {
+export async function onRequest(ctx) {
+  try { return await handle(ctx); }
+  catch (err) {
+    // Until migration 0006 is applied, the Outreach view says so instead of showing a raw database error.
+    if (/no such table: outreach/.test(String(err && err.message))) throw new HttpError(503, "Outreach isn't set up in the database yet (migration 0006_outreach.sql still to be applied).");
+    throw err;
+  }
+}
+
+async function handle({ request, env, params, data }) {
   const db = env.DB, method = request.method, url = new URL(request.url);
   const [what, id, action] = params.path || [];
 
