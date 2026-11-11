@@ -324,7 +324,7 @@ async function drawVenues() {
       <div class="kpi"><small>No email on file</small><b>${c.no_email || 0}</b></div><div class="kpi"><small>No rooms yet</small><b>${c.no_rooms || 0}</b></div>`;
     el.innerHTML = items.length ? `<table><thead><tr><th>Venue</th><th>Booking email</th><th class="r">Rooms</th><th class="r">From</th><th>Consent</th></tr></thead><tbody>
       ${items.map(v => `<tr data-v="${esc(v.id)}" class="${v.id === curVenue ? "on" : ""}" style="cursor:pointer">
-        <td>${esc(v.name)}<small class="mono">${esc(v.id)} · ${esc(v.operator)}</small></td>
+        <td>${esc(v.name)}<small class="mono">${esc(v.id)} · ${esc(v.operator)}${v.engine ? " · " + esc(v.engine) : ""}</small></td>
         <td>${v.booking_email ? esc(v.booking_email) : `<span class="missing">Add email</span>`}${v.contact_name ? `<small>${esc(v.contact_name)}</small>` : ""}</td>
         <td class="r">${v.rooms || `<span class="muted">–</span>`}${v.rooms ? `<small>${v.rates} rate${v.rates === 1 ? "" : "s"}</small>` : ""}</td>
         <td class="r">${v.from_rate ? R(v.from_rate) : `<span class="muted">–</span>`}</td>
@@ -352,7 +352,9 @@ async function venue(id) {
       <div class="grid2"><label>Phone<input id="vc-phone" value="${esc(v.booking_phone || "")}"></label>
         <label>Rate sheet link (PDF or page)<input id="vc-rates" type="url" value="${esc(v.rates_url || "")}" placeholder="https://…"></label></div>
       <div class="grid2"><label>Official website<input id="vc-web" type="url" value="${esc(v.website || "")}" placeholder="https://…"></label>
-        <label>Consent note<input id="vc-note" value="${esc(v.consent_note || "")}" placeholder="e.g. Owner replied yes by email, 12 Nov"></label></div>
+        <label>Booking engine<input id="vc-engine" list="vc-engines" value="${esc(v.engine || "")}" placeholder="e.g. NightsBridge, or leave blank"></label></div>
+      <datalist id="vc-engines">${["NightsBridge", "CapeNature portal", "SANParks reservations", "SiteMinder", "ResRequest", "Cloudbeds", "eviivo", "Own website form", "Email / phone only"].map(o => `<option value="${o}">`).join("")}</datalist>
+      <label>Consent note<input id="vc-note" value="${esc(v.consent_note || "")}" placeholder="e.g. Owner replied yes by email, 12 Nov"></label>
       <div class="btnrow"><button class="primary">Save contact</button>${v.website ? `<a class="btn" href="${esc(v.website)}" target="_blank" rel="noopener" style="text-decoration:none">Open website ↗</a>` : ""}${v.rates_url ? `<a class="btn" href="${esc(v.rates_url)}" target="_blank" rel="noopener" style="text-decoration:none">Open rate sheet ↗</a>` : ""}</div><p class="err" id="vc-err"></p></form>
     <div class="card"><div class="row2"><h3>Rooms &amp; rates</h3><span class="muted" style="font-size:.82rem">${v.rates_checked_at ? "Last updated " + when(v.rates_checked_at) : "Nothing entered yet"}</span></div>
       ${rooms.length ? rooms.map(roomHTML).join("") : `<p class="muted" style="margin:0;font-size:.88rem">No room types yet. Add each room, unit, hut or campsite type with its nightly rates.</p>`}
@@ -366,6 +368,7 @@ async function venue(id) {
     e.preventDefault();
     const body = { bookingEmail: $("#vc-email").value.trim(), contactName: $("#vc-name").value.trim(), bookingPhone: $("#vc-phone").value.trim(), ratesUrl: $("#vc-rates").value.trim(), consentNote: $("#vc-note").value.trim() };
     const web = $("#vc-web").value.trim(); if (web !== (v.website || "")) body.website = web;   // only sent when changed
+    const eng = $("#vc-engine").value.trim(); if (eng !== (v.engine || "")) body.engine = eng;   // a record only: the site's booking type still comes from bookMode() in app-core.js
     try { await api("/stays/" + encodeURIComponent(v.id), { method: "PATCH", body: JSON.stringify(body) }); toast("Contact saved"); drawVenues(); venue(v.id); }
     catch (err) { $("#vc-err").textContent = err.message; }
   };

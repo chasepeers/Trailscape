@@ -15,7 +15,7 @@
 //   PUT    /api/admin/availability                  { stayId, nights: [{ date, status, bedsLeft, price? }] }  (instant stays)
 //   GET    /api/admin/stays?q=
 //   PATCH  /api/admin/stays/WC-064                  { pricePp?, beds?, mode?, engineRef?, bookingEmail?, bookingPhone?, active?,
-//            consent?, consentNote?, contactName?, ratesUrl?, website?, ratesChecked? }   consent decides whether the stay shows on the site
+//            engine?, consent?, consentNote?, contactName?, ratesUrl?, website?, ratesChecked? }   consent decides whether the stay shows on the site
 //   GET    /api/admin/venues?q=&consent=yes|no&email=missing&rooms=missing   every stay with contact, consent and room counts
 //   GET    /api/admin/venues/WC-064                 one stay with all its rooms and rates
 //   POST   /api/admin/venues/WC-064/rooms           { name, sleeps?, bedSetup?, units?, included?, notes?, rates?: [rate] }
@@ -151,7 +151,7 @@ async function handle({ request, env, params, data }) {
     if (url.searchParams.get("email") === "missing") where.push("(s.booking_email IS NULL OR s.booking_email = '')");
     if (url.searchParams.get("rooms") === "missing") where.push("NOT EXISTS (SELECT 1 FROM rooms m WHERE m.stay_id = s.id AND m.active = 1)");
     const { results } = await db.prepare(`
-      SELECT s.id, s.name, s.operator, s.op_key, s.kind, s.mode, s.booking_email, s.booking_phone, s.contact_name, s.consent, s.consent_at,
+      SELECT s.id, s.name, s.operator, s.op_key, s.kind, s.mode, s.engine, s.booking_email, s.booking_phone, s.contact_name, s.consent, s.consent_at,
              s.rates_url, s.rates_checked_at,
              (SELECT COUNT(*) FROM rooms m WHERE m.stay_id = s.id AND m.active = 1) AS rooms,
              (SELECT COUNT(*) FROM room_rates r JOIN rooms m ON m.id = r.room_id WHERE m.stay_id = s.id AND m.active = 1) AS rates,
