@@ -468,7 +468,7 @@ async function outreachEmailAction({ request, env, db, id, action, method }) {
   if (action !== "email") throw new HttpError(404, "Unknown outreach action");
   const v = await db.prepare("SELECT * FROM stays WHERE id = ?").bind(id).first();
   if (!v) throw new HttpError(404, "Unknown stay");
-  const msg = outreachEmail({ venueName: v.name, contactName: v.contact_name });
+  const msg = outreachEmail({ venueName: v.name });
   const from = outreachFrom(env), replyTo = outreachReplyTo(env), hello = notifyTo(env);
   if (method === "GET") return json({ to: v.booking_email || null, from, replyTo, ...msg });
   if (method !== "POST") throw new HttpError(405, "Use GET or POST");
