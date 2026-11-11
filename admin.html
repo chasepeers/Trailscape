@@ -522,10 +522,11 @@ async function outVenue(id) {
   curOut = id; curVenue = null; history.replaceState(null, "", "#outreach-" + encodeURIComponent(id));
   document.querySelectorAll("tr[data-o]").forEach(tr => tr.classList.toggle("on", tr.dataset.o === id));
   const side = $("#side"); side.innerHTML = `<p class="muted">Loading…</p>`; side.scrollTop = 0;
-  let v; try { v = await api("/outreach/" + encodeURIComponent(id)); } catch (err) { side.innerHTML = `<p class="err">${esc(err.message)}</p>`; return; }
-  const o = v.outreach || {}, st = o.status || null, now = today();
+  let v, mail; try { [v, mail] = await Promise.all([api("/outreach/" + encodeURIComponent(id)), api("/outreach/" + encodeURIComponent(id) + "/email").catch(() => null)]); }
+  catch (err) { side.innerHTML = `<p class="err">${esc(err.message)}</p>`; return; }
+  const o = v.outreach || {}, st = o.status || null, now = today(), fresh = !st || st === "planned";
   const quick = [];
-  if (!st || st === "planned") quick.push(["sent", "Mark sent today", true]);
+  if (fresh) quick.push(["sent", "Mark sent today (sent by hand)"]);
   if (st === "sent" || st === "no_reply") quick.push(["follow", "Follow-up sent today"], ["replied", "They replied"], ["no_reply", "No reply"]);
   if (st === "sent" || st === "no_reply" || st === "replied") quick.push(["yes", "Said yes", st === "replied"], ["declined", "Declined"]);
   if (st === "sent") quick.push(["bounced", "Bounced"]);
@@ -537,11 +538,18 @@ async function outVenue(id) {
       ${v.contact_name ? `<div class="muted">${esc(v.contact_name)}</div>` : ""}
       ${v.website ? `<div><a href="${esc(v.website)}" target="_blank" rel="noopener">${esc(v.website.replace(/^https?:\/\/(www\.)?/, "").replace(/\/$/, ""))} ↗</a></div>` : ""}
       <div class="consentrow">${sw(v.id, v.consent, "Consent for " + v.name)}<b>${v.consent ? "Consent on · shown on the map" : "Consent off · hidden from the site"}</b></div></div>
+    ${mail ? `<div class="card" id="om"><h3>Outreach email</h3>
+      <span class="muted" style="font-size:.8rem">Sent from ${esc(mail.from)} through the site's mail service, so the link to trailscape.co.za arrives as a direct link. Replies go to ${esc(mail.replyTo)}; a copy is sent there too.</span>
+      <label>To<input id="om-to" type="email" value="${esc(o.sent_to || v.booking_email || "")}" placeholder="booking email"></label>
+      <details><summary style="cursor:pointer;font-size:.88rem">Preview: ${esc(mail.subject)}</summary><div class="msg" style="margin-top:6px"><pre>${esc(mail.text)}</pre></div></details>
+      <div class="btnrow"><button class="primary" id="om-send">${fresh ? "Send outreach email" : "Send again (follow-up)"}</button></div>
+      <div class="btnrow" style="align-items:center"><input id="om-test" type="email" style="flex:1;min-width:160px" placeholder="test address"><button id="om-tsend">Send test</button></div>
+      <p class="err" id="om-err" style="margin:0"></p></div>` : ""}
     ${quick.length ? `<div class="card"><h3>Quick update</h3><div class="btnrow">${quick.map(([k, t, p]) => `<button data-q="${k}" class="${p ? "primary" : ""}">${t}</button>`).join("")}</div>
       <span class="muted" style="font-size:.8rem">Sending an email or follow-up sets the next follow-up ${FOLLOW_DAYS} days out. A reply clears it.</span></div>` : ""}
     <form class="card" id="of"><h3>Details</h3>
       <div class="grid2"><label>Status<select id="of-status">${Object.entries(OUT).map(([k, [t]]) => `<option value="${k}" ${k === (st || "sent") ? "selected" : ""}>${t}</option>`).join("")}</select></label>
-        <label>Email used<select id="of-tpl">${["short", "full", "other"].map(x => `<option value="${x}" ${x === (o.template || "short") ? "selected" : ""}>${x === "short" ? "Short version" : x === "full" ? "Full version" : "Other"}</option>`).join("")}</select></label></div>
+        <label>Email used<select id="of-tpl">${["short", "full", "other"].map(x => `<option value="${x}" ${x === (o.template || "short") ? "selected" : ""}>${x === "short" ? "Outreach template" : x === "full" ? "Old full version" : "Other"}</option>`).join("")}</select></label></div>
       <div class="grid2"><label>Sent to<input id="of-to" type="email" value="${esc(o.sent_to || v.booking_email || "")}"></label><label>Sent from<input id="of-from" type="email" value="${esc(o.sent_from || FROM_ADDR)}"></label></div>
       <div class="grid3"><label>Sent on<input id="of-sent" type="date" value="${o.sent_at || ""}"></label><label>Replied on<input id="of-rep" type="date" value="${o.replied_at || ""}"></label>
         <label>Follow up on<input id="of-fu" type="date" value="${o.follow_up_on || ""}"></label></div>
@@ -551,6 +559,25 @@ async function outVenue(id) {
     <div><h3 style="margin-bottom:6px">History</h3>${v.log.length ? `<div class="log">${v.log.map(l => `<div><time>${when(l.at)}</time><span>${esc(l.text)}</span></div>`).join("")}</div>` : `<p class="muted" style="margin:0">Nothing yet.</p>`}</div>
     <div class="btnrow"><button id="o-back">Back to the list</button></div>`;
   bindConsent(side);
+  if (mail) {
+    const tIn = $("#om-test"); try { tIn.value = localStorage.getItem("ts-outreach-test") || FROM_ADDR; } catch { tIn.value = FROM_ADDR; }
+    const busy = (on) => ["#om-send", "#om-tsend"].forEach(s => { const b = $(s); if (b) b.disabled = on; });
+    $("#om-tsend").onclick = async () => {
+      const to = tIn.value.trim(); $("#om-err").textContent = ""; busy(true);
+      try { try { localStorage.setItem("ts-outreach-test", to); } catch {}
+        await api("/outreach/" + encodeURIComponent(v.id) + "/email", { method: "POST", body: JSON.stringify({ test: true, to }) }); toast("Test sent to " + to); outVenue(v.id); }
+      catch (err) { $("#om-err").textContent = err.message; busy(false); }
+    };
+    $("#om-send").onclick = async () => {
+      const to = $("#om-to").value.trim(); $("#om-err").textContent = "";
+      if (!to) { $("#om-err").textContent = "Enter the venue's email address."; return; }
+      if (!confirm(fresh ? `Send the outreach email to ${to} now?\n\n“${mail.subject}”` : `${v.name} was already contacted${o.sent_at ? " on " + shortDay(o.sent_at) : ""}. Send the outreach email again to ${to} as a follow-up?`)) return;
+      busy(true);
+      try { const r = await api("/outreach/" + encodeURIComponent(v.id) + "/email", { method: "POST", body: JSON.stringify({ to, again: !fresh }) });
+        toast(`Sent to ${r.to} · follow up ${shortDay(r.followUpOn)}`); drawOutreach(); outVenue(v.id); }
+      catch (err) { $("#om-err").textContent = err.message; busy(false); }
+    };
+  }
   if ($("#o-ven")) $("#o-ven").onclick = () => { venues(); venue(v.id); };
   $("#o-back").onclick = () => { curOut = null; history.replaceState(null, "", "#outreach"); outreach(); };
   side.querySelectorAll("button[data-q]").forEach(b => b.onclick = () => {
