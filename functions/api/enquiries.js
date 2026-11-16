@@ -27,8 +27,13 @@ export async function onRequestPost({ request, env, waitUntil }) {
   const who = stay.op_key === "cn" || stay.op_key === "sp" ? stay.operator : stay.name;
   // Email the stay first, so the admin note can say whether that worked; then the admin and the guest.
   waitUntil((async () => {
-    const asked = await askOperator(env, db, ref).catch(e => { console.error("askOperator", e); return { ok: false, reason: "error" }; });
-    const stayLine = asked.ok ? `We've emailed ${stay.name} at ${asked.to}. Their answer will update this enquiry automatically.`
+    // No consent yet: never email the stay automatically; the admin decides once the owner has agreed.
+    const asked = !stay.consent
+      ? await event(db, ref, "system", "Not emailed to the stay: no consent from the provider yet").run().then(() => ({ ok: false, reason: "no_consent" }))
+      : await askOperator(env, db, ref).catch(e => { console.error("askOperator", e); return { ok: false, reason: "error" }; });
+    const stayLine = asked.reason === "no_consent"
+      ? `ACTION NEEDED: ${stay.name} hasn't given consent yet, so it was NOT emailed. Get the owner's OK (Outreach), switch consent on, then press "Email the stay" on this enquiry.`
+      : asked.ok ? `We've emailed ${stay.name} at ${asked.to}. Their answer will update this enquiry automatically.`
       : asked.reason === "no_email" ? `ACTION NEEDED: ${stay.name} has no booking email on file, so it was NOT emailed. Add one under Stays in the back office, then press "Email the stay" on this enquiry.`
       : `ACTION NEEDED: emailing ${stay.name} failed (${asked.reason}). Press "Email the stay" on this enquiry to try again.`;
     await Promise.all([

@@ -604,8 +604,7 @@ function book(id) {
         <div class="gw"><label><input type="radio" name="gw" checked> Card</label><label><input type="radio" name="gw"> Instant EFT</label></div></div>
       <label class="field" style="flex-direction:row;gap:10px;align-items:flex-start;color:var(--fg);font-size:.9rem"><input type="checkbox" required style="width:auto;margin-top:4px;accent-color:var(--green)"> I agree that Trailscape books on my behalf and may share my name and contact details with ${OPS[p.op].label} for this booking.</label>
       <div class="note">${portal ? `We'll hold ${R(q.total)} on your card and only charge it once the booking is made.` : `We'll hold ${R(q.total)} on your card. It's only charged once ${OPS[p.op].label} confirms; if they can't take you, the hold is released.`}</div>
-      <button class="btn primary" type="submit">Hold ${R(q.total)} and request booking</button>
-      <span class="muted" style="font-size:.8rem">Prototype: no payment is taken and nothing is sent.</span></form>`);
+      <button class="btn primary" type="submit">Hold ${R(q.total)} and request booking</button></form>`);
     $("#payf").onsubmit = e => {
       e.preventDefault();
       const ref = "LT-" + (1043 + myTrips.length);
