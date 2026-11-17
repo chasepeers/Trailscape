@@ -18,6 +18,8 @@ MAIL_FROM = "Trailscape <hello@trailscape.co.za>"
 # which Resend Receiving posts to /api/inbound/resend. Leave REPLY_DOMAIN empty to have stays reply to NOTIFY_TO instead.
 OPERATOR_FROM = "Trailscape Bookings <bookings@trailscape.co.za>"
 REPLY_DOMAIN = "reply.trailscape.co.za"
+# "1" emails the stay automatically when a guest sends an Easy enquire request. "0": only the admin gets it (back office + email).
+AUTO_EMAIL_STAYS = "0"
 # Provider outreach emails (back office → Outreach → "Send outreach email"); replies go to hello@, which forwards to the Trailscape Gmail.
 OUTREACH_FROM = "Chase · Trailscape <hello@trailscape.co.za>"
 
