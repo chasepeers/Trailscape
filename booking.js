@@ -188,6 +188,26 @@
   // payments: false while no payment gateway is connected. Instant bookings are then taken as requests: nothing is
   // charged, we book with the stay and send a payment link. Set HS_CONFIG.payments = true once the gateway is live.
   const PAYMENTS = cfg.payments !== false;
+  // checkoutDown: true shows a "temporarily unavailable" notice when an instant booking reaches the payment step,
+  // and stops the booking from being placed. Set HS_CONFIG.checkoutDown = false to switch instant checkout back on.
+  const CHECKOUT_DOWN = cfg.checkoutDown !== false;
+  function checkoutDownNotice(onBack) {
+    const old = document.getElementById("hs-down"); if (old) old.remove();
+    const el = document.createElement("div");
+    el.id = "hs-down"; el.className = "hsmodal"; el.setAttribute("role", "dialog"); el.setAttribute("aria-modal", "true"); el.setAttribute("aria-labelledby", "hs-down-t");
+    el.innerHTML = `<div class="hsmodal-box">
+      <h2 id="hs-down-t">Online booking is temporarily down</h2>
+      <p>We're carrying out some maintenance on our booking and payment system, so you can't complete a booking online at the moment. Some features may be limited for the time being.</p>
+      <p>Nothing has been booked or charged. Please try again a little later, or email <a href="mailto:hello@trailscape.co.za">hello@trailscape.co.za</a> and we'll help you with your booking.</p>
+      <div class="hsmodal-btns"><button class="btn line" type="button" data-x="close">Close</button><button class="btn primary" type="button" data-x="back">← Back to dates</button></div>
+    </div>`;
+    const close = () => { el.remove(); document.removeEventListener("keydown", esc); };
+    const esc = e => { if (e.key === "Escape") close(); };
+    el.addEventListener("click", e => { const x = e.target.dataset && e.target.dataset.x; if (e.target === el || x === "close") close(); if (x === "back") { close(); onBack && onBack(); } });
+    document.addEventListener("keydown", esc);
+    document.body.appendChild(el);
+    el.querySelector('[data-x="back"]').focus();
+  }
   const backend = () => window.HS_BACKEND || apiBackend || sampleBackend;
   const call = (fn, arg) => { const b = backend(); return (b[fn] ? b : sampleBackend)[fn](arg); };
   const isSample = fn => { const b = backend(); return b === sampleBackend || !b[fn]; };
@@ -625,9 +645,14 @@
         </div>`);
       }
       $("#b-sum").innerHTML = summaryHTML(u, q, draft.n);
+      if (live && CHECKOUT_DOWN) {
+        const go = $("#b-go"); go.disabled = true; go.textContent = "Online booking temporarily unavailable";
+        checkoutDownNotice(() => $("#b-back") && $("#b-back").click());
+      }
       $("#b-back").onclick = () => { Object.assign(draft, guest(), { notes: $("#c-notes").value, flex: !!($("#c-flex") || {}).checked }); s1(); };
       $("#payf").onsubmit = async e => {
         e.preventDefault();
+        if (live && CHECKOUT_DOWN) { checkoutDownNotice(() => $("#b-back") && $("#b-back").click()); return; }
         const go = $("#b-go"), label = go.textContent; go.disabled = true; go.textContent = live ? "Placing your booking…" : "Sending your enquiry…";
         const base = { stayId: u.id, stayName: u.name, operator: u.opLabel, checkIn: q.in, checkOut: q.out, nights: q.nights, hikers: draft.n,
           guest: guest(), notes: $("#c-notes").value.trim() };

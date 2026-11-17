@@ -27,11 +27,17 @@ export async function onRequestPost({ request, env, waitUntil }) {
   const who = stay.op_key === "cn" || stay.op_key === "sp" ? stay.operator : stay.name;
   // Email the stay first, so the admin note can say whether that worked; then the admin and the guest.
   waitUntil((async () => {
-    // No consent yet: never email the stay automatically; the admin decides once the owner has agreed.
-    const asked = !stay.consent
+    // AUTO_EMAIL_STAYS is "1" to email the stay automatically. Off for now (Nov 2026): enquiries reach the back office
+    // and the admin only; the stay is emailed only when the admin presses "Email the stay".
+    const autoEmail = String(env.AUTO_EMAIL_STAYS || "") === "1";
+    const asked = !autoEmail
+      ? await event(db, ref, "system", "Not emailed to the stay: automatic stay emails are switched off").run().then(() => ({ ok: false, reason: "auto_off" }))
+      : !stay.consent
       ? await event(db, ref, "system", "Not emailed to the stay: no consent from the provider yet").run().then(() => ({ ok: false, reason: "no_consent" }))
       : await askOperator(env, db, ref).catch(e => { console.error("askOperator", e); return { ok: false, reason: "error" }; });
-    const stayLine = asked.reason === "no_consent"
+    const stayLine = asked.reason === "auto_off"
+      ? `Not sent to ${stay.name}: automatic stay emails are switched off, so only you have this enquiry. Press "Email the stay" on this enquiry if you want to ask them.`
+      : asked.reason === "no_consent"
       ? `ACTION NEEDED: ${stay.name} hasn't given consent yet, so it was NOT emailed. Get the owner's OK (Outreach), switch consent on, then press "Email the stay" on this enquiry.`
       : asked.ok ? `We've emailed ${stay.name} at ${asked.to}. Their answer will update this enquiry automatically.`
       : asked.reason === "no_email" ? `ACTION NEEDED: ${stay.name} has no booking email on file, so it was NOT emailed. Add one under Stays in the back office, then press "Email the stay" on this enquiry.`
